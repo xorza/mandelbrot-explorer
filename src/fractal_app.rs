@@ -1,3 +1,5 @@
+#![allow(unused_parens)]
+
 use num_complex::Complex;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
@@ -36,11 +38,11 @@ fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
         .par_iter_mut()
         .enumerate()
         .for_each(|(i, pixel)| {
-            let x = (i as f64 % width);
-            let y = (i as f64 / height) / aspect;
+            let x = (i as f64 % width) / width;
+            let y = (i as f64 / height) / (aspect * height);
 
-            let cx = (x * scale - (offset.x * width)) / width;
-            let cy = (y * scale - (offset.y * height)) / height;
+            let cx = x * scale - offset.x;
+            let cy = y * scale - offset.y;
 
             let cx = cx * aspect;
 
