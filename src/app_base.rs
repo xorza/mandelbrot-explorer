@@ -74,7 +74,7 @@ fn setup(title: &str) -> Setup {
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
-                features: wgpu::Features::empty(),
+                features: wgpu::Features::PUSH_CONSTANTS,
                 limits,
             },
             None,

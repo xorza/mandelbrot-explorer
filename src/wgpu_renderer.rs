@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 
-use bytemuck::{Pod, Zeroable};
 use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::math::UVec2;
+use crate::math::{ScreenRect, TextureSize, UVec2};
 
 fn create_texels(size: usize) -> Vec<u8> {
     (0..size * size)
@@ -25,28 +24,6 @@ fn create_texels(size: usize) -> Vec<u8> {
 }
 
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Vert {
-    pos: [f32; 4],
-    uw: [f32; 2],
-}
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ScreenRect([Vert; 4]);
-impl Default for ScreenRect {
-    fn default() -> ScreenRect {
-        ScreenRect([
-            // @formatter:off
-            Vert { pos: [-1.0, -1.0, 0.0, 1.0], uw: [0.0, 0.0] },
-            Vert { pos: [-1.0,  1.0, 0.0, 1.0], uw: [0.0, 1.0] },
-            Vert { pos: [ 1.0, -1.0, 0.0, 1.0], uw: [1.0, 0.0] },
-            Vert { pos: [ 1.0,  1.0, 0.0, 1.0], uw: [1.0, 1.0] },
-            // @formatter:on
-        ])
-    }
-}
-
 pub(crate) struct WgpuRenderer {
     window_size: UVec2,
     vertex_buffer: Buffer,
@@ -65,7 +42,7 @@ impl WgpuRenderer {
         let vertex_data = ScreenRect::default();
 
         let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
-            contents: bytemuck::bytes_of(&vertex_data),
+            contents: vertex_data.as_bytes(),
             usage: BufferUsages::VERTEX,
             label: None,
         });
@@ -89,7 +66,12 @@ impl WgpuRenderer {
         let pipeline_layout = device.create_pipeline_layout(
             &PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[],
+                push_constant_ranges: &[
+                    PushConstantRange {
+                        stages: wgpu::ShaderStages::VERTEX,
+                        range: 0..TextureSize::size_in_bytes(),
+                    },
+                ],
                 label: None,
             });
 
@@ -117,7 +99,7 @@ impl WgpuRenderer {
             ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(size),
-                rows_per_image: None,
+                rows_per_image: Some(size),
             },
             texture_extent,
         );
@@ -138,7 +120,7 @@ impl WgpuRenderer {
         });
 
         let vertex_buffers = [VertexBufferLayout {
-            array_stride: (4 + 2) * 4 as BufferAddress,
+            array_stride: ScreenRect::vert_size() as BufferAddress,
             step_mode: VertexStepMode::Vertex,
             attributes: &[
                 VertexAttribute {
@@ -193,6 +175,8 @@ impl WgpuRenderer {
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
 
+        let texture_size = TextureSize::from(self.window_size);
+
         {
             let mut render_pass = command_encoder
                 .begin_render_pass(
@@ -213,10 +197,14 @@ impl WgpuRenderer {
                 );
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                texture_size.as_bytes(),
+            );
 
             render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.draw(0..4, 0..1);
+            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 
         render.queue.submit(Some(command_encoder.finish()));
@@ -231,3 +219,4 @@ impl WgpuRenderer {
         self.window_size = window_size;
     }
 }
+
