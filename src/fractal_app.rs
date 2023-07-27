@@ -9,7 +9,7 @@ use winit::event_loop::EventLoopProxy;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::mandelbrot::mandelbrot;
+use crate::mandelbrot::mandelbrot1;
 use crate::math::{Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::WgpuRenderer;
 
@@ -223,7 +223,7 @@ impl FractalApp {
             let tex_size = tex_scale * Vec2f32::from(window_size);
             let tex_size = Vec2u32::from(tex_size);
 
-            let texels = mandelbrot(tex_size, offset, scale, cancel_token)
+            let texels = mandelbrot1(tex_size, offset, scale, cancel_token)
                 .ok();
 
             if let Some(texels) = texels {
