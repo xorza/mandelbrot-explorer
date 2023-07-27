@@ -4,8 +4,8 @@ use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::custom_math::{ScreenRect, TextureSize};
-use crate::math::Vec2u32;
+use crate::math::{Vec2f32, Vec2u32};
+use crate::render_pods::{PushConst, ScreenRect, TextureSize};
 
 struct ScreenTexBindGroup {
     bind_group: BindGroup,
@@ -58,7 +58,7 @@ impl WgpuRenderer {
                 push_constant_ranges: &[
                     PushConstantRange {
                         stages: wgpu::ShaderStages::VERTEX,
-                        range: 0..TextureSize::size_in_bytes(),
+                        range: 0..PushConst::size_in_bytes(),
                     },
                 ],
                 label: None,
@@ -170,7 +170,7 @@ impl WgpuRenderer {
         });
     }
 
-    pub fn go(&mut self, render: &RenderInfo) {
+    pub fn go(&mut self, render: &RenderInfo, offset: Vec2f32, scale: f32) {
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
 
@@ -196,10 +196,17 @@ impl WgpuRenderer {
             if let Some(screen_tex_bind_group) = self.screen_tex_bind_group.as_ref() {
                 render_pass.set_pipeline(&self.pipeline);
                 render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+
+                let mut pc = PushConst::new(screen_tex_bind_group.texture_size);
+                pc.m
+                    .translate2d(offset)
+                    .scale(scale)
+                ;
+
                 render_pass.set_push_constants(
                     wgpu::ShaderStages::VERTEX,
                     0,
-                    screen_tex_bind_group.texture_size.as_bytes(),
+                    pc.as_bytes(),
                 );
 
                 render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);

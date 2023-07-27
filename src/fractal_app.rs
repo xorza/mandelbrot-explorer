@@ -23,10 +23,15 @@ pub struct FractalApp {
 
     manipulate_state: ManipulateState,
 
-    offset: Vec2f64,
-    scale: f64,
+    final_offset: Vec2f64,
+    final_scale: f64,
 
-    task_handle: Option<tokio::task::JoinHandle<()>>,
+    draft_offset: Vec2f32,
+    draft_scale: f32,
+
+    currently_rendering: bool,
+    render_once_more: bool,
+
     updated_texture: Option<(Vec2u32, Vec<u8>)>,
 }
 
@@ -52,9 +57,6 @@ impl App for FractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let offset = Vec2f64::zeroed();
-        let scale = 1.0f64;
-
         Self {
             window_size,
             renderer,
@@ -63,10 +65,14 @@ impl App for FractalApp {
 
             manipulate_state: ManipulateState::Idle,
 
-            offset,
-            scale,
+            final_offset: Vec2f64::zeroed(),
+            final_scale: 1.0f64,
 
-            task_handle: None,
+            draft_offset: Vec2f32::zeroed(),
+            draft_scale: 1.0f32,
+
+            currently_rendering: false,
+            render_once_more: false,
             updated_texture: None,
         }
     }
@@ -77,20 +83,19 @@ impl App for FractalApp {
             Event::Resized(_size) => EventResult::Redraw,
 
             Event::MouseWheel(position, delta) => {
-                let zoom = 1.15f64.powf(delta as f64 / 5.0);
-                self.move_scale(position, Vec2i32::zeroed(), zoom);
+                self.move_scale(position, Vec2i32::zeroed(), delta);
                 self.rerender();
 
-                EventResult::Continue
+                EventResult::Redraw
             }
             Event::MouseMove { position, delta } => {
                 match self.manipulate_state {
                     ManipulateState::Idle => EventResult::Continue,
                     ManipulateState::Drag => {
-                        self.move_scale(position, delta, 1.0);
+                        self.move_scale(position, delta, 0.0);
                         self.rerender();
 
-                        EventResult::Continue
+                        EventResult::Redraw
                     }
                 }
             }
@@ -118,7 +123,7 @@ impl App for FractalApp {
             Event::Init => {
                 self.rerender();
                 EventResult::Continue
-            },
+            }
 
             _ => EventResult::Continue
         };
@@ -129,9 +134,12 @@ impl App for FractalApp {
     fn render(&mut self, render_info: RenderInfo) {
         if let Some((tex_size, texels)) = self.updated_texture.take() {
             self.renderer.update_texture(&render_info, tex_size, texels.as_slice());
+
+            self.draft_scale = 1.0f32;
+            self.draft_offset = Vec2f32::zeroed();
         }
 
-        self.renderer.go(&render_info);
+        self.renderer.go(&render_info, self.draft_offset, self.draft_scale);
     }
 
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32) {
@@ -146,30 +154,58 @@ impl App for FractalApp {
 }
 
 impl FractalApp {
-    fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, zoom: f64) {
-        let mouse_pos = Vec2f64::from(mouse_pos)
-            / Vec2f64::from(self.window_size);
-        let mouse_pos = Vec2f64::new(mouse_pos.x, 1.0 - mouse_pos.y);
+    fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
+        let mouse_pos = Vec2f32::from(mouse_pos)
+            / Vec2f32::from(self.window_size);
+        let mouse_pos = Vec2f32::new(mouse_pos.x, 1.0 - mouse_pos.y);
 
-        let mouse_delta = Vec2f64::from(mouse_delta)
-            / Vec2f64::from(self.window_size);
-        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
+        let mouse_delta = Vec2f32::from(mouse_delta)
+            / Vec2f32::from(self.window_size);
+        let mouse_delta = Vec2f32::new(mouse_delta.x, -mouse_delta.y);
 
-        let old_scale = self.scale;
-        let new_scale = old_scale / zoom;
+        let zoom = 1.15f32.powf(scroll_delta / 5.0);
 
-        let old_offset = self.offset;
-        let new_offset = mouse_delta * new_scale + old_offset + (mouse_pos - 0.5) * (new_scale - old_scale);
+        {
 
-        self.scale = new_scale;
-        self.offset = new_offset;
+            let old_final_scale = self.final_scale;
+            let new_final_scale = old_final_scale / zoom as f64;
+
+            let old_offset = self.final_offset;
+            let new_offset =
+                Vec2f64::from(mouse_delta) * new_final_scale
+                    + old_offset
+                    + (Vec2f64::from(mouse_pos) - 0.5) * (new_final_scale - old_final_scale);
+
+            self.final_scale = new_final_scale;
+            self.final_offset = new_offset;
+        }
+
+        {
+            let mouse_pos = mouse_pos * 2.0f32 - 1.0f32;
+
+            let old_draft_scale = self.draft_scale;
+            let new_draft_scale = old_draft_scale * zoom;
+
+            let old_draft_offset = self.draft_offset;
+            let new_draft_offset =
+                2.0 * mouse_delta * new_draft_scale
+                    + old_draft_offset
+                    - mouse_pos * (new_draft_scale - old_draft_scale);
+
+            self.draft_scale = new_draft_scale;
+            self.draft_offset = new_draft_offset;
+        }
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
         match event {
             UserEvent::UpdateTexture { size, texels } => {
                 self.updated_texture = Some((size, texels));
-                self.task_handle = None;
+                self.currently_rendering = false;
+                if self.render_once_more {
+                    self.render_once_more = false;
+                    self.rerender();
+                }
 
                 EventResult::Redraw
             }
@@ -179,17 +215,19 @@ impl FractalApp {
     }
 
     fn rerender(&mut self) {
-        if self.task_handle.is_some() {
+        if self.currently_rendering {
+            self.render_once_more = true;
             return;
         }
+        self.currently_rendering = true;
 
         let event_loop = self.event_loop.clone();
         let window_size = self.window_size;
-        let scale = self.scale;
-        let offset = self.offset;
+        let scale = self.final_scale;
+        let offset = self.final_offset;
 
-        self.task_handle = Some(self.runtime.spawn(async move {
-            let tex_scale = 0.3f32;
+        self.runtime.spawn(async move {
+            let tex_scale = 0.5f32;
             let tex_size = tex_scale * Vec2f32::from(window_size);
             let tex_size = Vec2u32::from(tex_size);
 
@@ -199,6 +237,6 @@ impl FractalApp {
                 size: tex_size,
                 texels,
             }).unwrap();
-        }));
+        });
     }
 }

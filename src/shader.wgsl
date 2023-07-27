@@ -4,7 +4,12 @@ struct VertexOutput {
 };
 
 
-var<push_constant> texture_size: vec2<f32>;
+struct PushConstant {
+    m: mat4x4<f32>,
+    texture_size: vec2<f32>,
+};
+var<push_constant> pc: PushConstant;
+
 
 @vertex
 fn vs_main(
@@ -12,8 +17,8 @@ fn vs_main(
     @location(1) tex_coord: vec2<f32>,
 ) -> VertexOutput {
     var result: VertexOutput;
-    result.position = position;
-    result.tex_coord = tex_coord * texture_size;
+    result.position = pc.m * position;
+    result.tex_coord = tex_coord * pc.texture_size;
     return result;
 }
 

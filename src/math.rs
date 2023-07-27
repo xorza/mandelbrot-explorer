@@ -211,7 +211,6 @@ impl Sub<f64> for Vec2f64 {
         }
     }
 }
-
 impl From<Vec2u32> for Vec2f64 {
     fn from(value: Vec2u32) -> Self {
         Self {
@@ -222,6 +221,14 @@ impl From<Vec2u32> for Vec2f64 {
 }
 impl From<Vec2i32> for Vec2f64 {
     fn from(value: Vec2i32) -> Self {
+        Self {
+            x: value.x as f64,
+            y: value.y as f64,
+        }
+    }
+}
+impl From<Vec2f32> for Vec2f64 {
+    fn from(value: Vec2f32) -> Self {
         Self {
             x: value.x as f64,
             y: value.y as f64,
@@ -247,6 +254,54 @@ impl Mul<f32> for Vec2f32 {
         Vec2f32 {
             x: self.x * scalar,
             y: self.y * scalar,
+        }
+    }
+}
+impl Sub<f32> for Vec2f32 {
+    type Output = Vec2f32;
+
+    fn sub(self, scalar: f32) -> Self::Output {
+        Vec2f32 {
+            x: self.x - scalar,
+            y: self.y - scalar,
+        }
+    }
+}
+impl Div for Vec2f32 {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x / rhs.x,
+            y: self.y / rhs.y,
+        }
+    }
+}
+impl Sub for Vec2f32 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+impl Add for Vec2f32 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+impl From<Vec2i32> for Vec2f32 {
+    fn from(value: Vec2i32) -> Self {
+        Self {
+            x: value.x as f32,
+            y: value.y as f32,
         }
     }
 }

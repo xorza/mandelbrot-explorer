@@ -9,7 +9,7 @@ mod event;
 mod math;
 mod fractal_app;
 mod wgpu_renderer;
-mod custom_math;
+mod render_pods;
 mod mandelbrot;
 
 

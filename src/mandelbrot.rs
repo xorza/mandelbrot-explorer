@@ -1,3 +1,5 @@
+use std::thread;
+
 use num_complex::Complex;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
@@ -50,6 +52,11 @@ pub fn mandelbrot(
 
     let elapsed = start.elapsed();
     println!("Mandelbrot rendered in {}ms", elapsed.as_millis());
+
+    // if elapsed.as_millis() < 500 {
+    //     let ms = 500 - elapsed.as_millis() as u64;
+    //     thread::sleep(std::time::Duration::from_millis(ms));
+    // }
 
     buffer
 }
