@@ -94,7 +94,7 @@ impl App for FractalApp {
             Event::Resized(_size) => EventResult::Redraw,
 
             Event::MouseWheel(position, delta) => {
-                let zoom = (1.0 - delta / 20.0) as f64;
+                let zoom = 1.15f64.powf(delta as f64 / 5.0);
                 self.move_scale(position, Vec2i32::zeroed(), zoom);
 
                 EventResult::Redraw
@@ -104,7 +104,6 @@ impl App for FractalApp {
                     ManipulateState::Idle => EventResult::Continue,
                     ManipulateState::Drag => {
                         self.move_scale(position, delta, 1.0);
-
 
                         EventResult::Redraw
                     }
@@ -133,10 +132,9 @@ impl App for FractalApp {
         result
     }
 
-
     fn render(&mut self, render_info: RenderInfo) {
         if self.is_dirty {
-            let tex_scale = 6u32;
+            let tex_scale = 3u32;
             let tex_size = Vec2u32::new(self.window_size.x / tex_scale, self.window_size.y / tex_scale);
             let texels = mandelbrot(tex_size, self.offset, self.scale);
             self.renderer.update_texture(&render_info, tex_size, texels.as_slice());
@@ -158,9 +156,12 @@ impl App for FractalApp {
 
 impl FractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, zoom: f64) {
-        let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
+        let mouse_pos = Vec2f64::from(mouse_pos)
+            / Vec2f64::from(self.window_size);
         let mouse_pos = Vec2f64::new(mouse_pos.x, 1.0 - mouse_pos.y);
-        let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
+
+        let mouse_delta = Vec2f64::from(mouse_delta)
+            / Vec2f64::from(self.window_size);
         let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
 
         let old_scale = self.scale;
@@ -171,19 +172,5 @@ impl FractalApp {
 
         self.scale = new_scale;
         self.offset = new_offset;
-
-        //                         let zoom_factor = 1.2; // adjust this to zoom more or less
-//                         let mouse_x = ...; // get the mouse's x coordinate relative to the image
-//                         let mouse_y = ...; // get the mouse's y coordinate relative to the image
-//
-//                         let new_scale = scale / zoom_factor;
-//
-// // Adjust the offset based on the mouse's position and the new scale
-//                         let new_offset_x = offset.x + (mouse_x - 0.5) * (new_scale - scale);
-//                         let new_offset_y = offset.y + (mouse_y - 0.5) * (new_scale - scale);
-//
-// // Then use these new values in your calculation
-//                         let cx = (x - 0.5) * new_scale - new_offset_x;
-//                         let cy = (y - 0.5) * new_scale - new_offset_y;
     }
 }
