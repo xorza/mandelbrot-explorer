@@ -19,7 +19,7 @@ pub enum Event {
     Resized(Vec2u32),
     WindowClose,
     RedrawFinished,
-    MouseWheel(f32),
+    MouseWheel(Vec2u32, f32),
     MouseMove {
         position: Vec2u32,
         delta: Vec2i32,

@@ -237,11 +237,11 @@ fn process_window_event(event: winit::event::WindowEvent, mouse_position: &mut V
         winit::event::WindowEvent::MouseWheel { delta, phase: _phase, .. } => {
             match delta {
                 winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
-                    Event::MouseWheel(l2)
+                    Event::MouseWheel(mouse_position.clone(), l2)
                 }
                 winit::event::MouseScrollDelta::PixelDelta(pix) => {
                     println!("PIXEL DELTA: {:?}", pix);
-                    Event::MouseWheel((pix.x + pix.y) as f32)
+                    Event::Unknown
                 }
             }
         }

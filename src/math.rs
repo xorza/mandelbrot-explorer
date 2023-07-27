@@ -194,6 +194,16 @@ impl Div<f64> for Vec2f64 {
         }
     }
 }
+impl Sub<f64> for Vec2f64 {
+    type Output = Vec2f64;
+
+    fn sub(self, scalar: f64) -> Self::Output {
+        Vec2f64 {
+            x: self.x - scalar,
+            y: self.y - scalar,
+        }
+    }
+}
 
 impl From<Vec2u32> for Vec2f64 {
     fn from(value: Vec2u32) -> Self {

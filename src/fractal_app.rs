@@ -8,7 +8,7 @@ use rayon::iter::ParallelIterator;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::math::{Vec2f64, Vec2u32};
+use crate::math::{Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::WgpuRenderer;
 
 enum ManipulateState {
@@ -93,18 +93,18 @@ impl App for FractalApp {
             Event::WindowClose => EventResult::Exit,
             Event::Resized(_size) => EventResult::Redraw,
 
-            Event::MouseWheel(delta) => {
-                self.scale *= (1.0 + delta / 20.0) as f64;
+            Event::MouseWheel(position, delta) => {
+                let zoom = (1.0 - delta / 20.0) as f64;
+                self.move_scale(position, Vec2i32::zeroed(), zoom);
 
                 EventResult::Redraw
             }
-            Event::MouseMove { position: _position, delta } => {
+            Event::MouseMove { position, delta } => {
                 match self.manipulate_state {
                     ManipulateState::Idle => EventResult::Continue,
                     ManipulateState::Drag => {
-                        let mut delta = Vec2f64::from(delta) / Vec2f64::from(self.window_size);
-                        delta.y = -delta.y;
-                        self.offset += delta * self.scale;
+                        self.move_scale(position, delta, 1.0);
+
 
                         EventResult::Redraw
                     }
@@ -133,6 +133,7 @@ impl App for FractalApp {
         result
     }
 
+
     fn render(&mut self, render_info: RenderInfo) {
         if self.is_dirty {
             let tex_scale = 6u32;
@@ -155,4 +156,34 @@ impl App for FractalApp {
     }
 }
 
-impl FractalApp {}
+impl FractalApp {
+    fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, zoom: f64) {
+        let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
+        let mouse_pos = Vec2f64::new(mouse_pos.x, 1.0 - mouse_pos.y);
+        let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
+        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
+
+        let old_scale = self.scale;
+        let new_scale = old_scale / zoom;
+
+        let old_offset = self.offset;
+        let new_offset = mouse_delta * new_scale + old_offset + (mouse_pos - 0.5) * (new_scale - old_scale);
+
+        self.scale = new_scale;
+        self.offset = new_offset;
+
+        //                         let zoom_factor = 1.2; // adjust this to zoom more or less
+//                         let mouse_x = ...; // get the mouse's x coordinate relative to the image
+//                         let mouse_y = ...; // get the mouse's y coordinate relative to the image
+//
+//                         let new_scale = scale / zoom_factor;
+//
+// // Adjust the offset based on the mouse's position and the new scale
+//                         let new_offset_x = offset.x + (mouse_x - 0.5) * (new_scale - scale);
+//                         let new_offset_y = offset.y + (mouse_y - 0.5) * (new_scale - scale);
+//
+// // Then use these new values in your calculation
+//                         let cx = (x - 0.5) * new_scale - new_offset_x;
+//                         let cy = (y - 0.5) * new_scale - new_offset_y;
+    }
+}
