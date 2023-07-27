@@ -16,7 +16,7 @@ pub enum ElementState {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event {
-    Resize(Vec2u32),
+    Resized(Vec2u32),
     WindowClose,
     RedrawFinished,
     MouseWheel(f32),

@@ -1,54 +1,11 @@
 use std::borrow::Cow;
 
-use num_complex::Complex;
-use rayon::iter::IndexedParallelIterator;
-use rayon::iter::IntoParallelRefMutIterator;
-use rayon::iter::ParallelIterator;
 use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
 use crate::custom_math::{ScreenRect, TextureSize};
-use crate::math::{Vec2f64, Vec2u32};
-
-fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
-    let mut buffer: Vec<u8> = vec![0; (size.x * size.y) as usize];
-    let width = size.x as f64;
-    let height = size.y as f64;
-    let aspect = width / height;
-
-    let start = std::time::Instant::now();
-
-    buffer
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(i, pixel)| {
-            let x = i as f64 % width;
-            let y = i as f64 / height;
-
-            let cx = (x * scale - (offset.x * width)) * aspect / (0.5 * width);
-            let cy = (y * scale / aspect - (offset.y * height)) / (0.5 * height);
-
-            let c: Complex<f64> = Complex::new(cx, cy);
-            let mut z: Complex<f64> = Complex::new(0.0, 0.0);
-
-            let mut it: u32 = 0;
-            const MAX_IT: u32 = 256;
-
-            while z.norm() <= 4.0 && it <= MAX_IT {
-                z = z * z + c;
-                it += 1;
-            }
-
-            *pixel = it as u8;
-        });
-
-    let elapsed = start.elapsed();
-    println!("Mandelbrot rendered in {}ms", elapsed.as_millis());
-
-    buffer
-}
-
+use crate::math::Vec2u32;
 
 struct ScreenTexBindGroup {
     bind_group: BindGroup,
@@ -63,9 +20,6 @@ pub(crate) struct WgpuRenderer {
     bind_group_layout: BindGroupLayout,
     pipeline: RenderPipeline,
     screen_tex_bind_group: Option<ScreenTexBindGroup>,
-
-    pub offset: Vec2f64,
-    pub scale: f64,
 }
 
 
@@ -156,42 +110,27 @@ impl WgpuRenderer {
             multiview: None,
         });
 
-        let offset = Vec2f64::new(0.5, 0.5);
-        let scale = 1.0f64;
-
         Self {
             window_size,
             screen_rect_buf,
             bind_group_layout,
             pipeline,
             screen_tex_bind_group: None,
-            offset,
-            scale,
         }
     }
 
-    pub fn invalidate(&mut self) {
-        self.screen_tex_bind_group = None;
-    }
-
-    fn create_bind_group(
-        device: &Device,
-        queue: &Queue,
-        bind_group_layout: &BindGroupLayout,
+    pub fn update_texture(
+        &mut self,
+        render_info: &RenderInfo,
         tex_size: Vec2u32,
-        offset: Vec2f64,
-        scale: f64,
-    ) -> ScreenTexBindGroup {
-        let tex_scale = 4u32;
-        let tex_size = Vec2u32::new(tex_size.x / tex_scale, tex_size.y / tex_scale);
-
-        let texels = mandelbrot(tex_size, offset, scale);
+        texels: &[u8],
+    ) {
         let texture_extent = Extent3d {
             width: tex_size.x,
             height: tex_size.y,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&TextureDescriptor {
+        let texture = render_info.device.create_texture(&TextureDescriptor {
             size: texture_extent,
             mip_level_count: 1,
             sample_count: 1,
@@ -202,7 +141,7 @@ impl WgpuRenderer {
             label: None,
         });
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
-        queue.write_texture(
+        render_info.queue.write_texture(
             texture.as_image_copy(),
             &texels,
             ImageDataLayout {
@@ -212,8 +151,8 @@ impl WgpuRenderer {
             },
             texture_extent,
         );
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            layout: &bind_group_layout,
+        let bind_group = render_info.device.create_bind_group(&BindGroupDescriptor {
+            layout: &self.bind_group_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 1,
@@ -223,26 +162,16 @@ impl WgpuRenderer {
             label: None,
         });
 
-        ScreenTexBindGroup {
+        self.screen_tex_bind_group = Some(ScreenTexBindGroup {
             bind_group,
             texture,
             texture_view,
             texture_size: TextureSize::from(tex_size),
-        }
+        });
     }
 
     pub fn go(&mut self, render: &RenderInfo) {
-        if self.screen_tex_bind_group.is_none() {
-            let screen_tex_bind_group = Self::create_bind_group(
-                render.device,
-                render.queue,
-                &self.bind_group_layout,
-                self.window_size,
-                self.offset,
-                self.scale,
-            );
-            self.screen_tex_bind_group = Some(screen_tex_bind_group);
-        }
+        assert!(self.screen_tex_bind_group.is_some());
 
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
@@ -288,7 +217,6 @@ impl WgpuRenderer {
         }
 
         self.window_size = window_size;
-        self.invalidate();
     }
 }
 

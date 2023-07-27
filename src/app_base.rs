@@ -4,8 +4,8 @@ use std::time::Instant;
 use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::Limits;
-use winit::{event_loop::{ControlFlow, EventLoop}};
 use winit::dpi::LogicalSize;
+use winit::event_loop::{ControlFlow, EventLoop};
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2i32, Vec2u32};
@@ -150,7 +150,7 @@ fn start<E: App>(
                 let window_size = Vec2u32::new(size.width, size.height);
 
                 app.resize(&device, &queue, window_size);
-                result = app.update(Event::Resize(window_size));
+                result = app.update(Event::Resized(window_size));
             }
 
             winit::event::Event::RedrawRequested(_) => {
@@ -201,9 +201,10 @@ fn start<E: App>(
 
 fn process_window_event(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event {
     match event {
-        winit::event::WindowEvent::Resized(size) => Event::Resize(
-            Vec2u32::new(size.width.max(1), size.height.max(1)),
-        ),
+        winit::event::WindowEvent::Resized(size) =>
+            Event::Resized(
+                Vec2u32::new(size.width.max(1), size.height.max(1)),
+            ),
         winit::event::WindowEvent::Focused(_is_focused) => {
             Event::Unknown
         }
