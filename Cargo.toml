@@ -1,0 +1,14 @@
+[package]
+name = "fractal"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "*"
+num-complex = "*"
+rayon = "*"
+bytemuck = { version = "*", features = ["derive"] }
+wgpu = "*"
+pollster = "*"
+glam = "*"
+
