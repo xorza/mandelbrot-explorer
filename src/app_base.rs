@@ -1,6 +1,8 @@
+use std::default::Default;
 use std::time::Instant;
 
 use pollster::FutureExt;
+use wgpu::Limits;
 use winit::{
     event::{self, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -63,7 +65,10 @@ fn setup(title: &str) -> Setup {
         .expect("No suitable GPU adapters found on the system.");
 
     // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
-    let limits = adapter.limits().using_resolution(adapter.limits());
+    let limits = Limits {
+        max_push_constant_size: 1024,
+        ..Default::default()
+    }.using_resolution(adapter.limits());
 
     let (device, queue) = adapter
         .request_device(

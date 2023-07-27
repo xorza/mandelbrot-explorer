@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::mem;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::*;
@@ -7,29 +6,6 @@ use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
 use crate::math::UVec2;
-
-fn vertex(pos: [f32; 3], tc: [i32; 2]) -> Vertex {
-    Vertex {
-        pos: [pos[0], pos[1], pos[2], 1.0],
-        tex_coord: [tc[0], tc[1]],
-    }
-}
-
-fn create_vertices() -> Vec<Vertex> {
-    // @formatter:off
-    let vertex_data = [
-        vertex([ 0.0, 0.0, 0.0], [ 0, 0]),
-        vertex([ 1.0, 0.0, 0.0], [ 100, 0]),
-        vertex([ 1.0, 1.0, 0.0], [ 100, 100]),
-
-        vertex([ 0.0, 0.0, 0.0], [ 0, 0]),
-        vertex([ 1.0, 1.0, 0.0], [ 100, 100]),
-        vertex([ 0.0, 1.0, 0.0], [ 0, 100]),
-    ];
-    // @formatter:on
-
-    vertex_data.to_vec()
-}
 
 fn create_texels(size: usize) -> Vec<u8> {
     (0..size * size)
@@ -51,16 +27,29 @@ fn create_texels(size: usize) -> Vec<u8> {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct Vertex {
+struct Vert {
     pos: [f32; 4],
-    tex_coord: [i32; 2],
+    uw: [f32; 2],
 }
-
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ScreenRect([Vert; 4]);
+impl Default for ScreenRect {
+    fn default() -> ScreenRect {
+        ScreenRect([
+            // @formatter:off
+            Vert { pos: [-1.0, -1.0, 0.0, 1.0], uw: [0.0, 0.0] },
+            Vert { pos: [-1.0,  1.0, 0.0, 1.0], uw: [0.0, 1.0] },
+            Vert { pos: [ 1.0, -1.0, 0.0, 1.0], uw: [1.0, 0.0] },
+            Vert { pos: [ 1.0,  1.0, 0.0, 1.0], uw: [1.0, 1.0] },
+            // @formatter:on
+        ])
+    }
+}
 
 pub(crate) struct WgpuRenderer {
     window_size: UVec2,
     vertex_buffer: Buffer,
-    vertex_count: u32,
     bind_group: BindGroup,
     pipeline: RenderPipeline,
 }
@@ -73,18 +62,16 @@ impl WgpuRenderer {
         surface_config: &SurfaceConfiguration,
         window_size: UVec2,
     ) -> Self {
-        let vertex_size = mem::size_of::<Vertex>();
-        let vertex_data = create_vertices();
+        let vertex_data = ScreenRect::default();
 
         let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
-            label: Some("Cube Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertex_data),
+            contents: bytemuck::bytes_of(&vertex_data),
             usage: BufferUsages::VERTEX,
+            label: None,
         });
 
         let bind_group_layout = device.create_bind_group_layout(
             &BindGroupLayoutDescriptor {
-                label: None,
                 entries: &[
                     BindGroupLayoutEntry {
                         binding: 1,
@@ -97,12 +84,13 @@ impl WgpuRenderer {
                         count: None,
                     },
                 ],
+                label: None,
             });
         let pipeline_layout = device.create_pipeline_layout(
             &PipelineLayoutDescriptor {
-                label: None,
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
+                label: None,
             });
 
         let size = 256u32;
@@ -134,7 +122,6 @@ impl WgpuRenderer {
             texture_extent,
         );
 
-
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             layout: &bind_group_layout,
             entries: &[
@@ -145,14 +132,13 @@ impl WgpuRenderer {
             ],
             label: None,
         });
-
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: None,
             source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
         });
 
         let vertex_buffers = [VertexBufferLayout {
-            array_stride: vertex_size as BufferAddress,
+            array_stride: (4 + 2) * 4 as BufferAddress,
             step_mode: VertexStepMode::Vertex,
             attributes: &[
                 VertexAttribute {
@@ -161,7 +147,7 @@ impl WgpuRenderer {
                     shader_location: 0,
                 },
                 VertexAttribute {
-                    format: VertexFormat::Sint32x2,
+                    format: VertexFormat::Float32x4,
                     offset: 4 * 4,
                     shader_location: 1,
                 },
@@ -184,8 +170,9 @@ impl WgpuRenderer {
                 ],
             }),
             primitive: PrimitiveState {
-                cull_mode: Some(Face::Back),
+                cull_mode: None,
                 front_face: FrontFace::Cw,
+                topology: PrimitiveTopology::TriangleStrip,
 
                 ..Default::default()
             },
@@ -194,51 +181,43 @@ impl WgpuRenderer {
             multiview: None,
         });
 
-        let mut result = Self {
+        Self {
             window_size,
             vertex_buffer,
-            vertex_count: vertex_data.len() as u32,
             bind_group,
             pipeline,
-        };
-
-        result.resize(device, queue, window_size);
-
-        result
+        }
     }
-
 
     pub fn go(&self, render: &RenderInfo) {
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
 
         {
-            let mut render_pass = command_encoder.begin_render_pass(
-                &RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[
-                        Some(RenderPassColorAttachment {
-                            view: render.view,
-                            resolve_target: None,
-                            ops: Operations {
-                                load: LoadOp::Clear(Color::RED),
-                                store: true,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: None,
-                });
-            render_pass.push_debug_group("Prepare data for draw.");
+            let mut render_pass = command_encoder
+                .begin_render_pass(
+                    &RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[
+                            Some(RenderPassColorAttachment {
+                                view: render.view,
+                                resolve_target: None,
+                                ops: Operations {
+                                    load: LoadOp::Clear(Color::RED),
+                                    store: true,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: None,
+                    }
+                );
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.pop_debug_group();
 
 
             render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.insert_debug_marker("Draw mandelbrot.");
-            render_pass.draw(0..self.vertex_count, 0..1);
+            render_pass.draw(0..4, 0..1);
         }
-
 
         render.queue.submit(Some(command_encoder.finish()));
     }
