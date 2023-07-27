@@ -4,7 +4,7 @@ use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 
 use crate::app_base::{App, RenderInfo};
-use crate::event::{Event, EventResult};
+use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2f64, Vec2u32};
 use crate::wgpu_renderer::WgpuRenderer;
 
@@ -13,7 +13,7 @@ enum ManipulateState {
     Drag,
 }
 
-pub struct WgpuApp {
+pub struct FractalApp {
     window_size: Vec2u32,
     renderer: WgpuRenderer,
     manipulate_state: ManipulateState,
@@ -36,11 +36,13 @@ fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
         .par_iter_mut()
         .enumerate()
         .for_each(|(i, pixel)| {
-            let x = i as f64 % width;
-            let y = i as f64 / height;
+            let x = (i as f64 % width);
+            let y = (i as f64 / height) / aspect;
 
-            let cx = (x * scale - (offset.x * width)) * aspect / (0.5 * width);
-            let cy = (y * scale / aspect - (offset.y * height)) / (0.5 * height);
+            let cx = (x * scale - (offset.x * width)) / width;
+            let cy = (y * scale - (offset.y * height)) / height;
+
+            let cx = cx * aspect;
 
             let c: Complex<f64> = Complex::new(cx, cy);
             let mut z: Complex<f64> = Complex::new(0.0, 0.0);
@@ -48,7 +50,7 @@ fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
             let mut it: u32 = 0;
             const MAX_IT: u32 = 256;
 
-            while z.norm() <= 4.0 && it <= MAX_IT {
+            while z.norm() <= 8.0 && it <= MAX_IT {
                 z = z * z + c;
                 it += 1;
             }
@@ -63,7 +65,7 @@ fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
 }
 
 
-impl App for WgpuApp {
+impl App for FractalApp {
     fn init(device: &wgpu::Device,
             queue: &wgpu::Queue,
             surface_config: &wgpu::SurfaceConfiguration) -> Self {
@@ -107,7 +109,7 @@ impl App for WgpuApp {
             }
             Event::MouseButton(btn, state, _position) => {
                 match (btn, state) {
-                    (crate::event::MouseButtons::Left, crate::event::ElementState::Pressed) => {
+                    (MouseButtons::Left, ElementState::Pressed) => {
                         self.manipulate_state = ManipulateState::Drag;
                         EventResult::Continue
                     }
@@ -130,10 +132,10 @@ impl App for WgpuApp {
 
     fn render(&mut self, render_info: RenderInfo) {
         if self.is_dirty {
-            let tex_scale = 4u32;
+            let tex_scale = 6u32;
             let tex_size = Vec2u32::new(self.window_size.x / tex_scale, self.window_size.y / tex_scale);
             let texels = mandelbrot(tex_size, self.offset, self.scale);
-            self.renderer.update_texture(&render_info,tex_size, texels.as_slice());
+            self.renderer.update_texture(&render_info, tex_size, texels.as_slice());
         }
 
         self.renderer.go(&render_info);
@@ -150,4 +152,4 @@ impl App for WgpuApp {
     }
 }
 
-impl WgpuApp {}
+impl FractalApp {}
