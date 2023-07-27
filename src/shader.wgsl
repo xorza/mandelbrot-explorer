@@ -20,7 +20,8 @@ var color: texture_2d<u32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    let clr = textureLoad(color, vec2<i32>(vertex.tex_coord * 256.0), 0).x;
-    let clrf = vec4<f32>(f32(clr) / 255.0, f32(clr) / 255.0, f32(clr) / 255.0, 1.0);
+    let r = textureLoad(color, vec2<i32>(vertex.tex_coord * 256.0), 0).x;
+    let rf = f32(r) / 255.0;
+    let clrf = vec4<f32>(rf, rf, rf, 1.0);
     return clrf;
 }
