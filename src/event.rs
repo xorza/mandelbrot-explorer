@@ -1,10 +1,30 @@
-use crate::math::UVec2;
+use crate::math::{Vec2i32, Vec2u32};
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum MouseButtons {
+    Left,
+    Right,
+    Middle,
+    Other(u8),
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum ElementState {
+    Pressed,
+    Released,
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event {
-    Resize(UVec2),
+    Resize(Vec2u32),
     WindowClose,
     RedrawFinished,
+    MouseWheel(f32),
+    MouseMove {
+        position: Vec2u32,
+        delta: Vec2i32,
+    },
+    MouseButton(MouseButtons, ElementState, Vec2u32),
     Unknown,
 }
 
@@ -15,43 +35,22 @@ pub enum EventResult {
     Exit,
 }
 
-impl<'a, T> From<winit::event::Event<'a, T>> for Event {
-    fn from(event: winit::event::Event<'a, T>) -> Self {
-        match event {
-            winit::event::Event::WindowEvent { event, .. } => match event {
-                winit::event::WindowEvent::Resized(size) => Event::Resize(
-                    UVec2::new(size.width.max(1), size.height.max(1)),
-                ),
-                winit::event::WindowEvent::Focused(_is_focused) => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::CursorEntered { .. } => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::CursorLeft { .. } => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::CursorMoved { position: _position, .. } => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::Occluded(_is_occluded) => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::MouseInput { state: _state, button: _button, .. } => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::MouseWheel { delta: _delta, phase: _phase, .. } => {
-                    Event::Unknown
-                }
-                winit::event::WindowEvent::CloseRequested => {
-                    Event::WindowClose
-                }
-                winit::event::WindowEvent::Moved(_position) => {
-                    Event::Unknown
-                }
-                _ => Event::Unknown,
-            },
-            _ => Event::Unknown,
+
+impl From<winit::event::ElementState> for ElementState {
+    fn from(value: winit::event::ElementState) -> Self {
+        match value {
+            winit::event::ElementState::Pressed => ElementState::Pressed,
+            winit::event::ElementState::Released => ElementState::Released,
+        }
+    }
+}
+impl From<winit::event::MouseButton> for MouseButtons {
+    fn from(value: winit::event::MouseButton) -> Self {
+        match value {
+            winit::event::MouseButton::Left => MouseButtons::Left,
+            winit::event::MouseButton::Right => MouseButtons::Right,
+            winit::event::MouseButton::Middle => MouseButtons::Middle,
+            winit::event::MouseButton::Other(other) => MouseButtons::Other(other as u8),
         }
     }
 }

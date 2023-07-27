@@ -1,15 +1,14 @@
 use std::default::Default;
 use std::time::Instant;
 
+use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::Limits;
-use winit::{
-    event::{self, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-};
+use winit::{event_loop::{ControlFlow, EventLoop}};
+use winit::dpi::LogicalSize;
 
-use crate::event::{Event, EventResult};
-use crate::math::UVec2;
+use crate::event::{ElementState, Event, EventResult, MouseButtons};
+use crate::math::{Vec2i32, Vec2u32};
 
 pub struct RenderInfo<'a> {
     pub device: &'a wgpu::Device,
@@ -23,8 +22,8 @@ pub trait App: 'static + Sized {
             queue: &wgpu::Queue,
             surface_config: &wgpu::SurfaceConfiguration) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
-    fn render(&self, render: RenderInfo);
-    fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: UVec2);
+    fn render(&mut self, render: RenderInfo);
+    fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32);
 }
 
 struct Setup {
@@ -43,6 +42,7 @@ fn setup(title: &str) -> Setup {
     let window =
         winit::window::WindowBuilder::new()
             .with_title(title)
+            .with_inner_size(LogicalSize::new(1024, 512))
             .build(&event_loop)
             .expect("Failed to create window.");
 
@@ -117,13 +117,14 @@ fn start<E: App>(
 
     let start = Instant::now();
     let mut has_error_scope = false;
+    let mut mouse_position: Vec2u32 = Vec2u32::zeroed();
 
     event_loop.run(move |event, _target, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
         let mut result: EventResult = EventResult::Continue;
 
         match event {
-            event::Event::RedrawEventsCleared => {
+            winit::event::Event::RedrawEventsCleared => {
                 if has_error_scope {
                     if let Some(error) = device.pop_error_scope().block_on() {
                         panic!("Device error: {:?}", error);
@@ -133,10 +134,10 @@ fn start<E: App>(
 
                 result = app.update(Event::RedrawFinished);
             }
-            event::Event::WindowEvent {
+            winit::event::Event::WindowEvent {
                 event:
-                WindowEvent::Resized(size)
-                | WindowEvent::ScaleFactorChanged {
+                winit::event::WindowEvent::Resized(size)
+                | winit::event::WindowEvent::ScaleFactorChanged {
                     new_inner_size: &mut size,
                     ..
                 },
@@ -146,13 +147,13 @@ fn start<E: App>(
                 config.height = size.height.max(1);
                 surface.configure(&device, &config);
 
-                let window_size = UVec2::new(size.width, size.height);
+                let window_size = Vec2u32::new(size.width, size.height);
 
                 app.resize(&device, &queue, window_size);
                 result = app.update(Event::Resize(window_size));
             }
 
-            event::Event::RedrawRequested(_) => {
+            winit::event::Event::RedrawRequested(_) => {
                 let surface_texture = match surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -182,12 +183,12 @@ fn start<E: App>(
                 surface_texture.present();
             }
 
-            _ => {
-                let event = Event::from(event);
-                if event != Event::Unknown {
-                    result = app.update(event);
-                }
+            winit::event::Event::WindowEvent { event, .. } => {
+                let event = process_window_event(event, &mut mouse_position);
+                result = app.update(event);
             }
+
+            _ => {}
         }
 
         match result {
@@ -196,6 +197,61 @@ fn start<E: App>(
             EventResult::Exit => *control_flow = ControlFlow::Exit
         }
     });
+}
+
+fn process_window_event(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event {
+    match event {
+        winit::event::WindowEvent::Resized(size) => Event::Resize(
+            Vec2u32::new(size.width.max(1), size.height.max(1)),
+        ),
+        winit::event::WindowEvent::Focused(_is_focused) => {
+            Event::Unknown
+        }
+        winit::event::WindowEvent::CursorEntered { .. } => {
+            Event::Unknown
+        }
+        winit::event::WindowEvent::CursorLeft { .. } => {
+            Event::Unknown
+        }
+        winit::event::WindowEvent::CursorMoved { position: _position, .. } => {
+            let prev_pos = *mouse_position;
+            let new_pos = Vec2u32::new(_position.x as u32, _position.y as u32);
+            *mouse_position = new_pos;
+
+            Event::MouseMove {
+                position: new_pos,
+                delta: Vec2i32::from(new_pos) - Vec2i32::from(prev_pos),
+            }
+        }
+        winit::event::WindowEvent::Occluded(_is_occluded) => {
+            Event::Unknown
+        }
+        winit::event::WindowEvent::MouseInput { state, button, .. } => {
+            Event::MouseButton(
+                MouseButtons::from(button),
+                ElementState::from(state),
+                mouse_position.clone(),
+            )
+        }
+        winit::event::WindowEvent::MouseWheel { delta, phase: _phase, .. } => {
+            match delta {
+                winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
+                    Event::MouseWheel(l2)
+                }
+                winit::event::MouseScrollDelta::PixelDelta(pix) => {
+                    println!("PIXEL DELTA: {:?}", pix);
+                    Event::MouseWheel((pix.x + pix.y) as f32)
+                }
+            }
+        }
+        winit::event::WindowEvent::CloseRequested => {
+            Event::WindowClose
+        }
+        winit::event::WindowEvent::Moved(_position) => {
+            Event::Unknown
+        }
+        _ => Event::Unknown,
+    }
 }
 
 pub fn run<E: App>(title: &str) {

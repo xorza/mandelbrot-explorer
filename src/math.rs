@@ -1,17 +1,24 @@
-use std::mem::size_of;
+use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
-pub struct UVec2 {
+pub struct Vec2u32 {
     pub x: u32,
     pub y: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
-pub struct UVec4 {
+pub struct Vec2i32 {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
+pub struct Vec4u32 {
     pub x: u32,
     pub y: u32,
     pub z: u32,
@@ -20,7 +27,7 @@ pub struct UVec4 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
-pub struct FVec4 {
+pub struct Vec4f32 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
@@ -29,31 +36,20 @@ pub struct FVec4 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
-pub struct FVec2 {
+pub struct Vec2f32 {
     pub x: f32,
     pub y: f32,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct TextureSize {
-    pub w: f32,
-    pub h: f32,
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
+pub struct Vec2f64 {
+    pub x: f64,
+    pub y: f64,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Vert {
-    pos: [f32; 4],
-    uw: [f32; 2],
-}
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct ScreenRect([Vert; 4]);
-
-
-impl FVec2 {
+impl Vec2f32 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
@@ -62,7 +58,16 @@ impl FVec2 {
     }
 }
 
-impl FVec4 {
+impl Vec2f64 {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+    pub fn all(v: f64) -> Self {
+        Self { x: v, y: v }
+    }
+}
+
+impl Vec4f32 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
         Self { x, y, z, w }
     }
@@ -71,7 +76,7 @@ impl FVec4 {
     }
 }
 
-impl UVec4 {
+impl Vec4u32 {
     pub fn new(x: u32, y: u32, z: u32, w: u32) -> Self {
         Self { x, y, z, w }
     }
@@ -80,7 +85,7 @@ impl UVec4 {
     }
 }
 
-impl UVec2 {
+impl Vec2u32 {
     pub fn new(x: u32, y: u32) -> Self {
         Self { x, y }
     }
@@ -90,46 +95,119 @@ impl UVec2 {
 }
 
 
-impl Default for ScreenRect {
-    fn default() -> ScreenRect {
-        ScreenRect([
-            // @formatter:off
-            Vert { pos: [-1.0, -1.0, 0.0, 1.0], uw: [0.0, 0.0] },
-            Vert { pos: [-1.0,  1.0, 0.0, 1.0], uw: [0.0, 1.0] },
-            Vert { pos: [ 1.0, -1.0, 0.0, 1.0], uw: [1.0, 0.0] },
-            Vert { pos: [ 1.0,  1.0, 0.0, 1.0], uw: [1.0, 1.0] },
-            // @formatter:on
-        ])
+impl Add for Vec2u32 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
     }
 }
-impl ScreenRect {
-    pub fn vert_size() -> u32 {
-        size_of::<Vert>() as u32
+impl Sub for Vec2u32 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
     }
-    pub fn size_in_bytes() -> u32 {
-        size_of::<ScreenRect>() as u32
-    }
-    pub fn vert_count() -> u32 {
-        Self::size_in_bytes() / Self::vert_size()
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(&self.0)
+}
+impl Mul for Vec2u32 {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+        }
     }
 }
 
-impl TextureSize {
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-    pub fn size_in_bytes() -> u32 {
-        size_of::<TextureSize>() as u32
+
+impl Sub for Vec2i32 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
     }
 }
-impl From<UVec2> for TextureSize{
-    fn from(v: UVec2) -> Self {
+
+impl From<Vec2u32> for Vec2i32 {
+    fn from(value: Vec2u32) -> Self {
         Self {
-            w: v.x as f32,
-            h: v.y as f32,
+            x: value.x as i32,
+            y: value.y as i32,
+        }
+    }
+}
+
+
+impl AddAssign for Vec2f64 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
+}
+impl Add for Vec2f64 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+impl Div for Vec2f64 {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x / rhs.x,
+            y: self.y / rhs.y,
+        }
+    }
+}
+impl Mul<f64> for Vec2f64 {
+    type Output = Vec2f64;
+
+    fn mul(self, scalar: f64) -> Self::Output {
+        Vec2f64 {
+            x: self.x * scalar,
+            y: self.y * scalar,
+        }
+    }
+}
+impl Div<f64> for Vec2f64 {
+    type Output = Vec2f64;
+
+    fn div(self, scalar: f64) -> Self::Output {
+        Vec2f64 {
+            x: self.x / scalar,
+            y: self.y / scalar,
+        }
+    }
+}
+
+impl From<Vec2u32> for Vec2f64 {
+    fn from(value: Vec2u32) -> Self {
+        Self {
+            x: value.x as f64,
+            y: value.y as f64,
+        }
+    }
+}
+impl From<Vec2i32> for Vec2f64 {
+    fn from(value: Vec2i32) -> Self {
+        Self {
+            x: value.x as f64,
+            y: value.y as f64,
         }
     }
 }
