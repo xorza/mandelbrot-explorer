@@ -14,7 +14,7 @@ mod mandelbrot;
 
 
 fn main() {
-    run::<FractalApp>("UI App");
+    run::<FractalApp>("Mandelbrot explorer");
 }
 
 

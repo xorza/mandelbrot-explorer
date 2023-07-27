@@ -25,7 +25,7 @@ pub fn mandelbrot1(
     let start = std::time::Instant::now();
 
     // center
-    let offset = Vec2f64::new(offset.x + 0.4, offset.y) * 2.3;
+    let offset = Vec2f64::new(offset.x + 0.2, offset.y) * 2.3;
     let scale = scale * 2.3;
 
     // let mut buffers = (0..size.y)
@@ -95,7 +95,7 @@ pub fn mandelbrot2(
     let start = std::time::Instant::now();
 
     // center
-    let offset = Vec2f64::new(offset.x + 0.4, offset.y) * 2.3;
+    let offset = Vec2f64::new(offset.x + 0.2, offset.y) * 2.3;
     let scale = scale * 2.3;
 
     let mut buffers = (0..size.y)

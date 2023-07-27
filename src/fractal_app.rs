@@ -219,7 +219,7 @@ impl FractalApp {
         let cancel_token = self.cancel_token.clone();
 
         self.runtime.spawn(async move {
-            let tex_scale = 0.5f32;
+            let tex_scale = 1.0f32;
             let tex_size = tex_scale * Vec2f32::from(window_size);
             let tex_size = Vec2u32::from(tex_size);
 
