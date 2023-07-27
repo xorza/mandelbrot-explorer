@@ -1,5 +1,8 @@
 #![allow(unused_parens)]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
@@ -29,8 +32,7 @@ pub struct FractalApp {
     draft_offset: Vec2f32,
     draft_scale: f32,
 
-    currently_rendering: bool,
-    render_once_more: bool,
+    cancel_token: Arc<AtomicU32>,
 
     updated_texture: Option<(Vec2u32, Vec<u8>)>,
 }
@@ -71,8 +73,7 @@ impl App for FractalApp {
             draft_offset: Vec2f32::zeroed(),
             draft_scale: 1.0f32,
 
-            currently_rendering: false,
-            render_once_more: false,
+            cancel_token: Arc::new(AtomicU32::new(0)),
             updated_texture: None,
         }
     }
@@ -166,7 +167,6 @@ impl FractalApp {
         let zoom = 1.15f32.powf(scroll_delta / 5.0);
 
         {
-
             let old_final_scale = self.final_scale;
             let new_final_scale = old_final_scale / zoom as f64;
 
@@ -201,11 +201,6 @@ impl FractalApp {
         match event {
             UserEvent::UpdateTexture { size, texels } => {
                 self.updated_texture = Some((size, texels));
-                self.currently_rendering = false;
-                if self.render_once_more {
-                    self.render_once_more = false;
-                    self.rerender();
-                }
 
                 EventResult::Redraw
             }
@@ -215,28 +210,28 @@ impl FractalApp {
     }
 
     fn rerender(&mut self) {
-        if self.currently_rendering {
-            self.render_once_more = true;
-            return;
-        }
-        self.currently_rendering = true;
+        self.cancel_token.fetch_add(1, Ordering::Relaxed);
 
         let event_loop = self.event_loop.clone();
         let window_size = self.window_size;
         let scale = self.final_scale;
         let offset = self.final_offset;
+        let cancel_token = self.cancel_token.clone();
 
         self.runtime.spawn(async move {
             let tex_scale = 0.5f32;
             let tex_size = tex_scale * Vec2f32::from(window_size);
             let tex_size = Vec2u32::from(tex_size);
 
-            let texels = mandelbrot(tex_size, offset, scale);
+            let texels = mandelbrot(tex_size, offset, scale, cancel_token)
+                .ok();
 
-            event_loop.send_event(UserEvent::UpdateTexture {
-                size: tex_size,
-                texels,
-            }).unwrap();
+            if let Some(texels) = texels {
+                event_loop.send_event(UserEvent::UpdateTexture {
+                    size: tex_size,
+                    texels,
+                }).unwrap();
+            }
         });
     }
 }
