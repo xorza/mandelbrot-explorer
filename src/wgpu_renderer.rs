@@ -78,7 +78,7 @@ impl WgpuRenderer {
                         visibility: ShaderStages::FRAGMENT,
                         ty: BindingType::Texture {
                             multisampled: false,
-                            sample_type: TextureSampleType::Uint,
+                            sample_type: TextureSampleType::Float { filterable: false },
                             view_dimension: TextureViewDimension::D2,
                         },
                         count: None,
@@ -106,7 +106,7 @@ impl WgpuRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::R8Uint,
+            format: TextureFormat::R8Unorm,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });

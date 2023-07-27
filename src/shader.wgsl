@@ -16,12 +16,11 @@ fn vs_main(
 
 @group(0)
 @binding(1)
-var color: texture_2d<u32>;
+var color: texture_2d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let r = textureLoad(color, vec2<i32>(vertex.tex_coord * 256.0), 0).x;
-    let rf = f32(r) / 255.0;
-    let clrf = vec4<f32>(rf, rf, rf, 1.0);
+    let clrf = vec4<f32>(r, r, r, 1.0);
     return clrf;
 }
