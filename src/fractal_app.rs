@@ -1,5 +1,6 @@
 #![allow(unused_parens)]
 
+use bytemuck::Zeroable;
 use num_complex::Complex;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefMutIterator;
@@ -41,8 +42,8 @@ fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
             let x = (i as f64 % width) / width;
             let y = (i as f64 / height) / (aspect * height);
 
-            let cx = x * scale - offset.x;
-            let cy = y * scale - offset.y;
+            let cx = (x - 0.5) * scale - offset.x;
+            let cy = (y - 0.5) * scale - offset.y;
 
             let cx = cx * aspect;
 
@@ -74,7 +75,7 @@ impl App for FractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let offset = Vec2f64::new(0.5, 0.5);
+        let offset = Vec2f64::zeroed();
         let scale = 1.0f64;
 
         Self {
