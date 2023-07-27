@@ -15,7 +15,8 @@ pub enum ElementState {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum Event {
+pub enum Event<UserEvent> {
+    Init,
     Resized(Vec2u32),
     WindowClose,
     RedrawFinished,
@@ -25,6 +26,7 @@ pub enum Event {
         delta: Vec2i32,
     },
     MouseButton(MouseButtons, ElementState, Vec2u32),
+    Custom(UserEvent),
     Unknown,
 }
 

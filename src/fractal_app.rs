@@ -1,14 +1,13 @@
 #![allow(unused_parens)]
 
 use bytemuck::Zeroable;
-use num_complex::Complex;
-use rayon::iter::IndexedParallelIterator;
-use rayon::iter::IntoParallelRefMutIterator;
-use rayon::iter::ParallelIterator;
+use tokio::runtime::Runtime;
+use winit::event_loop::EventLoopProxy;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::math::{Vec2f64, Vec2i32, Vec2u32};
+use crate::mandelbrot::mandelbrot;
+use crate::math::{Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::WgpuRenderer;
 
 enum ManipulateState {
@@ -19,59 +18,37 @@ enum ManipulateState {
 pub struct FractalApp {
     window_size: Vec2u32,
     renderer: WgpuRenderer,
+    event_loop: EventLoopProxy<UserEvent>,
+    runtime: Runtime,
+
     manipulate_state: ManipulateState,
-    is_dirty: bool,
 
     offset: Vec2f64,
     scale: f64,
+
+    task_handle: Option<tokio::task::JoinHandle<()>>,
+    updated_texture: Option<(Vec2u32, Vec<u8>)>,
 }
 
-
-fn mandelbrot(size: Vec2u32, offset: Vec2f64, scale: f64) -> Vec<u8> {
-    let mut buffer: Vec<u8> = vec![0; (size.x * size.y) as usize];
-    let width = size.x as f64;
-    let height = size.y as f64;
-    let aspect = width / height;
-
-    let start = std::time::Instant::now();
-
-    buffer
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(i, pixel)| {
-            let x = (i as f64 % width) / width;
-            let y = (i as f64 / height) / (aspect * height);
-
-            let cx = (x - 0.5) * scale - offset.x;
-            let cy = (y - 0.5) * scale - offset.y;
-
-            let cx = cx * aspect;
-
-            let c: Complex<f64> = Complex::new(cx, cy);
-            let mut z: Complex<f64> = Complex::new(0.0, 0.0);
-
-            let mut it: u32 = 0;
-            const MAX_IT: u32 = 256;
-
-            while z.norm() <= 8.0 && it <= MAX_IT {
-                z = z * z + c;
-                it += 1;
-            }
-
-            *pixel = it as u8;
-        });
-
-    let elapsed = start.elapsed();
-    println!("Mandelbrot rendered in {}ms", elapsed.as_millis());
-
-    buffer
+#[derive(Debug)]
+pub enum UserEvent {
+    Redraw,
+    UpdateTexture {
+        size: Vec2u32,
+        texels: Vec<u8>,
+    },
 }
-
 
 impl App for FractalApp {
-    fn init(device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            surface_config: &wgpu::SurfaceConfiguration) -> Self {
+    type UserEventType = UserEvent;
+
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface_config: &wgpu::SurfaceConfiguration,
+        event_loop_proxy: EventLoopProxy<UserEvent>,
+    ) -> FractalApp
+    {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
@@ -81,14 +58,20 @@ impl App for FractalApp {
         Self {
             window_size,
             renderer,
+            event_loop: event_loop_proxy,
+            runtime: Runtime::new().unwrap(),
+
             manipulate_state: ManipulateState::Idle,
-            is_dirty: true,
+
             offset,
             scale,
+
+            task_handle: None,
+            updated_texture: None,
         }
     }
 
-    fn update(&mut self, event: Event) -> EventResult {
+    fn update(&mut self, event: Event<UserEvent>) -> EventResult {
         let result = match event {
             Event::WindowClose => EventResult::Exit,
             Event::Resized(_size) => EventResult::Redraw,
@@ -96,16 +79,18 @@ impl App for FractalApp {
             Event::MouseWheel(position, delta) => {
                 let zoom = 1.15f64.powf(delta as f64 / 5.0);
                 self.move_scale(position, Vec2i32::zeroed(), zoom);
+                self.rerender();
 
-                EventResult::Redraw
+                EventResult::Continue
             }
             Event::MouseMove { position, delta } => {
                 match self.manipulate_state {
                     ManipulateState::Idle => EventResult::Continue,
                     ManipulateState::Drag => {
                         self.move_scale(position, delta, 1.0);
+                        self.rerender();
 
-                        EventResult::Redraw
+                        EventResult::Continue
                     }
                 }
             }
@@ -122,21 +107,27 @@ impl App for FractalApp {
                 }
             }
 
+            Event::Custom(event) => {
+                if matches!(event, UserEvent::Redraw) {
+                    EventResult::Redraw
+                } else {
+                    self.update_user_event(event)
+                }
+            }
+
+            Event::Init => {
+                self.rerender();
+                EventResult::Continue
+            },
+
             _ => EventResult::Continue
         };
-
-        if matches!(result, EventResult::Redraw) {
-            self.is_dirty = true;
-        }
 
         result
     }
 
     fn render(&mut self, render_info: RenderInfo) {
-        if self.is_dirty {
-            let tex_scale = 3u32;
-            let tex_size = Vec2u32::new(self.window_size.x / tex_scale, self.window_size.y / tex_scale);
-            let texels = mandelbrot(tex_size, self.offset, self.scale);
+        if let Some((tex_size, texels)) = self.updated_texture.take() {
             self.renderer.update_texture(&render_info, tex_size, texels.as_slice());
         }
 
@@ -150,7 +141,7 @@ impl App for FractalApp {
 
         self.window_size = window_size;
         self.renderer.resize(device, queue, window_size);
-        self.is_dirty = true;
+        self.rerender();
     }
 }
 
@@ -172,5 +163,42 @@ impl FractalApp {
 
         self.scale = new_scale;
         self.offset = new_offset;
+    }
+
+    fn update_user_event(&mut self, event: UserEvent) -> EventResult {
+        match event {
+            UserEvent::UpdateTexture { size, texels } => {
+                self.updated_texture = Some((size, texels));
+                self.task_handle = None;
+
+                EventResult::Redraw
+            }
+
+            _ => EventResult::Continue
+        }
+    }
+
+    fn rerender(&mut self) {
+        if self.task_handle.is_some() {
+            return;
+        }
+
+        let event_loop = self.event_loop.clone();
+        let window_size = self.window_size;
+        let scale = self.scale;
+        let offset = self.offset;
+
+        self.task_handle = Some(self.runtime.spawn(async move {
+            let tex_scale = 0.3f32;
+            let tex_size = tex_scale * Vec2f32::from(window_size);
+            let tex_size = Vec2u32::from(tex_size);
+
+            let texels = mandelbrot(tex_size, offset, scale);
+
+            event_loop.send_event(UserEvent::UpdateTexture {
+                size: tex_size,
+                texels,
+            }).unwrap();
+        }));
     }
 }

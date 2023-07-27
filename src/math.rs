@@ -125,7 +125,14 @@ impl Mul for Vec2u32 {
         }
     }
 }
-
+impl From<Vec2f32> for Vec2u32 {
+    fn from(value: Vec2f32) -> Self {
+        Self {
+            x: value.x as u32,
+            y: value.y as u32,
+        }
+    }
+}
 
 impl Sub for Vec2i32 {
     type Output = Self;
@@ -218,6 +225,36 @@ impl From<Vec2i32> for Vec2f64 {
         Self {
             x: value.x as f64,
             y: value.y as f64,
+        }
+    }
+}
+
+
+impl Mul<Vec2f32> for f32 {
+    type Output = Vec2f32;
+
+    fn mul(self, vec: Vec2f32) -> Self::Output {
+        Vec2f32 {
+            x: vec.x * self,
+            y: vec.y * self,
+        }
+    }
+}
+impl Mul<f32> for Vec2f32 {
+    type Output = Vec2f32;
+
+    fn mul(self, scalar: f32) -> Self::Output {
+        Vec2f32 {
+            x: self.x * scalar,
+            y: self.y * scalar,
+        }
+    }
+}
+impl From<Vec2u32> for Vec2f32 {
+    fn from(value: Vec2u32) -> Self {
+        Self {
+            x: value.x as f32,
+            y: value.y as f32,
         }
     }
 }

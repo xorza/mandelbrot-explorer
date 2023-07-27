@@ -4,8 +4,7 @@ use std::time::Instant;
 use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::Limits;
-use winit::dpi::LogicalSize;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2i32, Vec2u32};
@@ -18,17 +17,22 @@ pub struct RenderInfo<'a> {
 }
 
 pub trait App: 'static + Sized {
-    fn init(device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            surface_config: &wgpu::SurfaceConfiguration) -> Self;
-    fn update(&mut self, event: Event) -> EventResult;
+    type UserEventType;
+
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface_config: &wgpu::SurfaceConfiguration,
+        event_loop_proxy: EventLoopProxy<Self::UserEventType>,
+    ) -> Self;
+    fn update(&mut self, event: Event<Self::UserEventType>) -> EventResult;
     fn render(&mut self, render: RenderInfo);
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32);
 }
 
-struct Setup {
+struct Setup<UserEventType: 'static> {
     window: winit::window::Window,
-    event_loop: EventLoop<()>,
+    event_loop: EventLoop<UserEventType>,
     instance: wgpu::Instance,
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface,
@@ -37,12 +41,14 @@ struct Setup {
     queue: wgpu::Queue,
 }
 
-fn setup(title: &str) -> Setup {
-    let event_loop = EventLoop::new();
+fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
+    let event_loop: EventLoop<UserEventType> =
+        EventLoopBuilder::<UserEventType>::with_user_event()
+            .build();
     let window =
         winit::window::WindowBuilder::new()
             .with_title(title)
-            .with_inner_size(LogicalSize::new(1024, 512))
+            // .with_inner_size(LogicalSize::new(1024, 512))
             .build(&event_loop)
             .expect("Failed to create window.");
 
@@ -94,7 +100,7 @@ fn setup(title: &str) -> Setup {
     }
 }
 
-fn start<E: App>(
+fn start<AppType: App>(
     Setup {
         window,
         event_loop,
@@ -104,7 +110,7 @@ fn start<E: App>(
         adapter,
         device,
         queue,
-    }: Setup,
+    }: Setup<AppType::UserEventType>,
 ) {
     let mut config = surface
         .get_default_config(&adapter, size.width, size.height)
@@ -113,11 +119,18 @@ fn start<E: App>(
     config.view_formats.push(surface_view_format);
     surface.configure(&device, &config);
 
-    let mut app = E::init(&device, &queue, &config);
+    let event_loop_proxy = event_loop.create_proxy();
+    let mut app = AppType::new(&device, &queue, &config, event_loop_proxy);
 
     let start = Instant::now();
     let mut has_error_scope = false;
     let mut mouse_position: Vec2u32 = Vec2u32::zeroed();
+
+    match app.update(Event::Init) {
+        EventResult::Continue => {}
+        EventResult::Redraw => window.request_redraw(),
+        EventResult::Exit => return,
+    }
 
     event_loop.run(move |event, _target, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
@@ -188,6 +201,10 @@ fn start<E: App>(
                 result = app.update(event);
             }
 
+            winit::event::Event::UserEvent(event) => {
+                result = app.update(Event::Custom(event));
+            }
+
             _ => {}
         }
 
@@ -199,7 +216,7 @@ fn start<E: App>(
     });
 }
 
-fn process_window_event(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event {
+fn process_window_event<UserEvent>(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event<UserEvent> {
     match event {
         winit::event::WindowEvent::Resized(size) =>
             Event::Resized(
@@ -255,7 +272,7 @@ fn process_window_event(event: winit::event::WindowEvent, mouse_position: &mut V
     }
 }
 
-pub fn run<E: App>(title: &str) {
-    let setup = setup(title);
-    start::<E>(setup);
+pub fn run<AppType: App>(title: &str) {
+    let setup = setup::<AppType::UserEventType>(title);
+    start::<AppType>(setup);
 }

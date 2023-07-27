@@ -10,4 +10,11 @@ rayon = "*"
 bytemuck = { version = "*", features = ["derive"] }
 wgpu = "*"
 pollster = "*"
+tokio = { version = "*", features = ["full"] }
+anyhow = "*"
 
+[profile.release]
+opt-level = 3         # Apply the highest level of optimizations.
+lto = true            # Enable Link Time Optimization
+codegen-units = 1     # Reduce parallel code generation which can improve optimizations
+panic = 'abort'       # Abort on panic. Can have minor performance benefits over unwinding.

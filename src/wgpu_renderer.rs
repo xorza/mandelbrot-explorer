@@ -171,14 +171,10 @@ impl WgpuRenderer {
     }
 
     pub fn go(&mut self, render: &RenderInfo) {
-        assert!(self.screen_tex_bind_group.is_some());
-
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
 
         {
-            let screen_tex_bind_group = self.screen_tex_bind_group.as_ref().unwrap();
-
             let mut render_pass = command_encoder
                 .begin_render_pass(
                     &RenderPassDescriptor {
@@ -188,7 +184,7 @@ impl WgpuRenderer {
                                 view: render.view,
                                 resolve_target: None,
                                 ops: Operations {
-                                    load: LoadOp::Clear(Color::RED),
+                                    load: LoadOp::Clear(Color::BLACK),
                                     store: true,
                                 },
                             }),
@@ -196,16 +192,19 @@ impl WgpuRenderer {
                         depth_stencil_attachment: None,
                     }
                 );
-            render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                screen_tex_bind_group.texture_size.as_bytes(),
-            );
 
-            render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);
-            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+            if let Some(screen_tex_bind_group) = self.screen_tex_bind_group.as_ref() {
+                render_pass.set_pipeline(&self.pipeline);
+                render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+                render_pass.set_push_constants(
+                    wgpu::ShaderStages::VERTEX,
+                    0,
+                    screen_tex_bind_group.texture_size.as_bytes(),
+                );
+
+                render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);
+                render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+            }
         }
 
         render.queue.submit(Some(command_encoder.finish()));
