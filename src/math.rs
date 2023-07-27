@@ -47,6 +47,7 @@ struct Vert {
     pos: [f32; 4],
     uw: [f32; 2],
 }
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct ScreenRect([Vert; 4]);
@@ -88,24 +89,6 @@ impl UVec2 {
     }
 }
 
-
-impl From<glam::UVec2> for UVec2 {
-    fn from(v: glam::UVec2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
-    }
-}
-
-impl From<UVec2> for glam::UVec2 {
-    fn from(v: UVec2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
-    }
-}
 
 impl Default for ScreenRect {
     fn default() -> ScreenRect {

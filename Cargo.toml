@@ -10,5 +10,4 @@ rayon = "*"
 bytemuck = { version = "*", features = ["derive"] }
 wgpu = "*"
 pollster = "*"
-glam = "*"
 

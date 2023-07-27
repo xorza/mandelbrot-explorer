@@ -24,11 +24,18 @@ fn create_texels(size: usize) -> Vec<u8> {
 }
 
 
+struct ScreenTexBindGroup {
+    bind_group: BindGroup,
+    texture: Texture,
+    texture_view: TextureView,
+}
+
 pub(crate) struct WgpuRenderer {
     window_size: UVec2,
-    vertex_buffer: Buffer,
-    bind_group: BindGroup,
+    screen_rect_buf: Buffer,
+    bind_group_layout: BindGroupLayout,
     pipeline: RenderPipeline,
+    screen_tex_bind_group: ScreenTexBindGroup,
 }
 
 
@@ -39,10 +46,8 @@ impl WgpuRenderer {
         surface_config: &SurfaceConfiguration,
         window_size: UVec2,
     ) -> Self {
-        let vertex_data = ScreenRect::default();
-
-        let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
-            contents: vertex_data.as_bytes(),
+        let screen_rect_buf = device.create_buffer_init(&util::BufferInitDescriptor {
+            contents: ScreenRect::default().as_bytes(),
             usage: BufferUsages::VERTEX,
             label: None,
         });
@@ -74,51 +79,10 @@ impl WgpuRenderer {
                 ],
                 label: None,
             });
-
-        let size = 256u32;
-        let texels = create_texels(size as usize);
-        let texture_extent = Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("Mandelbrot Set Texture"),
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let texture_view = texture.create_view(&TextureViewDescriptor::default());
-        queue.write_texture(
-            texture.as_image_copy(),
-            &texels,
-            ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(size),
-                rows_per_image: Some(size),
-            },
-            texture_extent,
-        );
-
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&texture_view),
-                },
-            ],
-            label: None,
-        });
         let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: None,
             source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
         });
-
         let vertex_buffers = [VertexBufferLayout {
             array_stride: ScreenRect::vert_size() as BufferAddress,
             step_mode: VertexStepMode::Vertex,
@@ -135,7 +99,6 @@ impl WgpuRenderer {
                 },
             ],
         }];
-
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),
@@ -163,11 +126,65 @@ impl WgpuRenderer {
             multiview: None,
         });
 
+        let screen_tex_bind_group = Self::create_bind_group(device, queue, &bind_group_layout);
+
         Self {
             window_size,
-            vertex_buffer,
-            bind_group,
+            screen_rect_buf,
+            bind_group_layout,
             pipeline,
+            screen_tex_bind_group,
+        }
+    }
+
+    fn create_bind_group(
+        device: &Device,
+        queue: &Queue,
+        bind_group_layout: &BindGroupLayout,
+    ) -> ScreenTexBindGroup {
+        let size = 256u32;
+        let texels = create_texels(size as usize);
+        let texture_extent = Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        };
+        let texture = device.create_texture(&TextureDescriptor {
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::R8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+            label: None,
+        });
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        queue.write_texture(
+            texture.as_image_copy(),
+            &texels,
+            ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(size),
+                rows_per_image: Some(size),
+            },
+            texture_extent,
+        );
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::TextureView(&texture_view),
+                },
+            ],
+            label: None,
+        });
+
+        ScreenTexBindGroup {
+            bind_group,
+            texture,
+            texture_view,
         }
     }
 
@@ -196,27 +213,32 @@ impl WgpuRenderer {
                     }
                 );
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
             render_pass.set_push_constants(
                 wgpu::ShaderStages::VERTEX,
                 0,
                 texture_size.as_bytes(),
             );
 
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.screen_tex_bind_group.bind_group, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 
         render.queue.submit(Some(command_encoder.finish()));
     }
 
-
-    pub(crate) fn resize(&mut self, _device: &Device, _queue: &Queue, window_size: UVec2) {
+    pub(crate) fn resize(&mut self, device: &Device, queue: &Queue, window_size: UVec2) {
         if self.window_size == window_size {
             return;
         }
 
         self.window_size = window_size;
+        let screen_tex_bind_group = Self::create_bind_group(
+            device,
+            queue,
+            &self.bind_group_layout,
+        );
+        self.screen_tex_bind_group = screen_tex_bind_group;
     }
 }
 
