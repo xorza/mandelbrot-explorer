@@ -17,12 +17,13 @@ const TILE_SIZE: u32 = 128;
 
 pub enum TileState {
     Idle,
-    Pending {
+    Computing {
         task_handle: JoinHandle<()>,
     },
-    Ready {
+    WaitForUpload {
         buffer: Vec<u8>,
     },
+    Ready
 }
 
 
@@ -142,15 +143,16 @@ impl MandelTexture {
                 let tile_state = &mut *tile_state_mutex;
 
                 if !frame_rect.intersects(&tile_rect) {
-                    if let TileState::Pending { task_handle } = tile_state {
+                    if let TileState::Computing { task_handle } = tile_state {
                         tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         task_handle.abort();
+                        *tile_state = TileState::Idle;
                     }
-                    *tile_state = TileState::Idle;
+
                     return;
                 }
 
-                if matches!(tile_state, TileState::Pending {..}) {
+                if !matches!(tile_state, TileState::Idle) {
                     return;
                 }
 
@@ -175,7 +177,7 @@ impl MandelTexture {
 
                     let mut tile_state = tile_state_clone.lock().unwrap();
                     if let Some(buf) = buf {
-                        *tile_state = TileState::Ready {
+                        *tile_state = TileState::WaitForUpload {
                             buffer: buf,
                         };
                         (callback)(tile_index);
@@ -185,7 +187,7 @@ impl MandelTexture {
                     }
                 });
 
-                *tile_state = TileState::Pending {
+                *tile_state = TileState::Computing {
                     task_handle,
                 };
             });
@@ -199,13 +201,13 @@ impl MandelTexture {
 
                 {
                     let mut tile_state = tile.state.lock().unwrap();
-                    if let TileState::Ready { buffer } = &mut *tile_state {
+                    if let TileState::WaitForUpload { buffer } = &mut *tile_state {
                         let mut new_buff: Vec<u8> = Vec::new();
                         swap(&mut new_buff, buffer);
                         buff = Some(new_buff);
                     }
-                    if matches!(*tile_state, TileState::Ready { .. }) {
-                        *tile_state = TileState::Idle;
+                    if matches!(*tile_state, TileState::WaitForUpload { .. }) {
+                        *tile_state = TileState::Ready;
                     }
                 }
 

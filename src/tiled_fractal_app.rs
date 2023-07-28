@@ -181,7 +181,7 @@ impl App for TiledFractalApp {
 
 impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
-        let mouse_pos = Vec2u32::new(mouse_pos.x, self.window_size.y - mouse_pos.y);
+        let mouse_pos = Vec2i32::new(mouse_pos.x as i32, self.window_size.y as i32 - mouse_pos.y as i32);
         let mouse_pos_f = Vec2f32::from(mouse_pos)
             / Vec2f32::from(self.window_size);
 
@@ -221,7 +221,7 @@ impl TiledFractalApp {
             self.draft_offset = new_draft_offset;
         }
 
-        self.render_fractal(mouse_pos);
+        self.render_fractal(Vec2u32::from(mouse_pos));
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
@@ -239,7 +239,7 @@ impl TiledFractalApp {
             Arc::new(Mutex::new(self.event_loop.clone()));
 
         let frame_rect = RectI32::new(
-            -Vec2i32::from(self.draft_offset),
+            -Vec2i32::from(self.draft_offset / 2.0),
             Vec2i32::from(self.window_size),
         );
 

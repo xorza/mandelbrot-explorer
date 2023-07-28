@@ -188,6 +188,14 @@ impl From<Vec2f32> for Vec2u32 {
         }
     }
 }
+impl From<Vec2i32> for Vec2u32 {
+    fn from(value: Vec2i32) -> Self {
+        Self {
+            x: value.x as u32,
+            y: value.y as u32,
+        }
+    }
+}
 
 impl Neg for Vec2i32 {
     type Output = Self;
