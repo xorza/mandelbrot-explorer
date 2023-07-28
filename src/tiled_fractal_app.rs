@@ -11,7 +11,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::{MandelTexture, TileState};
-use crate::math::{Vec2f32, Vec2f64, Vec2i32, Vec2u32};
+use crate::math::{RectU32, Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
 
 enum ManipulateState {
@@ -233,8 +233,15 @@ impl TiledFractalApp {
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
+        let screen_rect = RectU32::new(
+            Vec2u32::zeroed(),
+            self.window_size,
+        );
+
         self.mandel_texture.render(
             &self.runtime,
+            screen_rect,
+            screen_rect.center(),
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {
@@ -268,8 +275,8 @@ impl TiledFractalApp {
                             texture: &self.mandel_texture.texture,
                             mip_level: 0,
                             origin: wgpu::Origin3d {
-                                x: tile.offset.x,
-                                y: tile.offset.y,
+                                x: tile.rect.pos.x,
+                                y: tile.rect.pos.y,
                                 z: 0,
                             },
                             aspect: TextureAspect::All,
@@ -277,16 +284,15 @@ impl TiledFractalApp {
                         &buff,
                         wgpu::ImageDataLayout {
                             offset: 0,
-                            bytes_per_row: Some(tile.size.x),
-                            rows_per_image: Some(tile.size.y),
+                            bytes_per_row: Some(tile.rect.size.x),
+                            rows_per_image: Some(tile.rect.size.y),
                         },
                         wgpu::Extent3d {
-                            width: tile.size.x,
-                            height: tile.size.y,
+                            width: tile.rect.size.x,
+                            height: tile.rect.size.y,
                             depth_or_array_layers: 1,
                         },
                     );
-                    println!("tile updated");
                 }
             });
     }
