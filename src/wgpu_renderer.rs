@@ -136,6 +136,11 @@ impl WgpuRenderer {
         render_info: &RenderInfo,
         screen_tex_bind_group: &ScreenTexBindGroup,
     ) {
+        let tex_size = Vec2f32::from(screen_tex_bind_group.texture_size);
+        let win_size = Vec2f32::from(self.window_size);
+        let scale = tex_size / win_size;
+
+
         let mut command_encoder = render_info.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
@@ -161,10 +166,11 @@ impl WgpuRenderer {
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
-            let mut pc = PushConst::new(screen_tex_bind_group.texture_size);
-            pc.m
+
+            let mut pc = PushConst::new();
+            pc.proj_mat
                 // .translate2d(offset)
-                .scale(Vec2f32::new(1.0, self.window_size.x as f32 / self.window_size.y as f32));
+                .scale(scale);
 
             render_pass.set_push_constants(
                 wgpu::ShaderStages::VERTEX,

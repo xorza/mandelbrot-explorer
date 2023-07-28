@@ -44,7 +44,8 @@ pub struct MandelTexture {
 
 impl MandelTexture {
     pub fn new(device: &wgpu::Device) -> Self {
-        let tex_size = 1024;
+        let tex_size =
+            1024*1;
             // device.limits().max_texture_dimension_2d;
         assert!(tex_size >= 1024);
 
@@ -163,8 +164,8 @@ pub fn mandelbrot(
     let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
 
     // center
-    let offset = Vec2f64::new(fractal_offset.x + 0.2, fractal_offset.y) * 2.3;
-    let scale = fractal_scale * 2.3;
+    let offset = Vec2f64::new(fractal_offset.x + 0.19, fractal_offset.y) * 3.7;
+    let scale = fractal_scale * 3.7;
 
     for y in 0..tile_size.y {
         if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {

@@ -2,14 +2,7 @@ use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::math::{Mat4x4f32, Vec2u32};
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct TextureSize {
-    pub w: f32,
-    pub h: f32,
-}
+use crate::math::{Mat4x4f32, Vec2f32};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -25,8 +18,7 @@ pub struct ScreenRect([Vert; 4]);
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct PushConst {
-    pub m: Mat4x4f32,
-    pub texture_size: TextureSize,
+    pub proj_mat: Mat4x4f32,
 }
 
 impl Default for ScreenRect {
@@ -56,28 +48,11 @@ impl ScreenRect {
     }
 }
 
-impl TextureSize {
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
-    }
-    pub fn size_in_bytes() -> u32 {
-        size_of::<TextureSize>() as u32
-    }
-}
-impl From<Vec2u32> for TextureSize {
-    fn from(v: Vec2u32) -> Self {
-        Self {
-            w: v.x as f32,
-            h: v.y as f32,
-        }
-    }
-}
 
 impl PushConst {
-    pub fn new(texture_size: Vec2u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            m: Mat4x4f32::default(),
-            texture_size: TextureSize::from(texture_size),
+            proj_mat: Mat4x4f32::default(),
         }
     }
     pub fn as_bytes(&self) -> &[u8] {

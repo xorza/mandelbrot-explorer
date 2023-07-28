@@ -60,7 +60,8 @@ impl App for TiledFractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let mandel_texture = MandelTexture::new(device);
+        let mut mandel_texture = MandelTexture::new(device);
+        mandel_texture.fractal_scale = mandel_texture.size.x as f64 / window_size.x as f64;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -276,11 +277,11 @@ impl TiledFractalApp {
                         &buff,
                         wgpu::ImageDataLayout {
                             offset: 0,
-                            bytes_per_row:  Some(tile.size.x),
+                            bytes_per_row: Some(tile.size.x),
                             rows_per_image: Some(tile.size.y),
                         },
                         wgpu::Extent3d {
-                            width:  tile.size.x,
+                            width: tile.size.x,
                             height: tile.size.y,
                             depth_or_array_layers: 1,
                         },
