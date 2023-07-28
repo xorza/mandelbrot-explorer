@@ -39,6 +39,9 @@ pub struct MandelTexture {
     pub texture_view1: wgpu::TextureView,
     pub texture_view2: wgpu::TextureView,
 
+
+    runtime: Runtime,
+
     pub size: Vec2u32,
 
     pub max_iter: u32,
@@ -49,6 +52,9 @@ pub struct MandelTexture {
     pub fractal_scale: f64,
 
     pub image_offset: Vec2i32,
+
+    frame_rect: RectI32,
+    focus: Vec2i32,
 }
 
 impl MandelTexture {
@@ -109,35 +115,49 @@ impl MandelTexture {
 
         let image_offset = Vec2i32::all(tex_size as i32 / 2);
 
+        let runtime = Runtime::new().unwrap();
+
         Self {
             texture1,
             texture_view1,
             texture2,
             texture_view2,
+            runtime,
             size: Vec2u32::new(tex_size, tex_size),
             max_iter: 100,
             tiles,
             fractal_offset: Vec2f64::zeroed(),
             fractal_scale: 1.0,
             image_offset,
+
+            frame_rect: RectI32::zeroed(),
+            focus: Vec2i32::zeroed(),
         }
     }
 
-    pub fn render<F>(
-        &mut self,
-        runtime: &Runtime,
-        frame_rect: RectI32,
-        focus: Vec2u32,
-        tile_ready_callback: F,
-    )
-    where F: Fn(usize) + Clone + Send + Sync + 'static
-    {
+    pub fn pan(&mut self,
+               frame_rect: RectI32,
+               focus: Vec2u32,
+    ) {
         let mut frame_rect = frame_rect;
         frame_rect.pos += self.image_offset - (frame_rect.size / 2);
         let focus = Vec2i32::from(focus) + frame_rect.pos;
 
         frame_rect.pos += Vec2i32::all(150);
         frame_rect.size -= Vec2i32::all(300);
+
+        self.frame_rect = frame_rect;
+        self.focus = focus;
+    }
+
+    pub fn render<F>(
+        &mut self,
+        tile_ready_callback: F,
+    )
+    where F: Fn(usize) + Clone + Send + Sync + 'static
+    {
+        let frame_rect = self.frame_rect;
+        let focus = self.focus;
 
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = Vec2i32::from(a.rect.center());
@@ -187,7 +207,7 @@ impl MandelTexture {
                 let cancel_token = tile.cancel_token.clone();
                 let tile_state_clone = tile.state.clone();
 
-                let task_handle = runtime.spawn(async move {
+                let task_handle = self.runtime.spawn(async move {
                     let buf = mandelbrot(
                         img_size,
                         tile_rect,

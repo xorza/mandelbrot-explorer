@@ -243,11 +243,9 @@ impl TiledFractalApp {
             Vec2i32::from(self.window_size),
         );
 
+        self.mandel_texture.pan(frame_rect, focus);
 
         self.mandel_texture.render(
-            &self.runtime,
-            frame_rect,
-            focus,
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {
