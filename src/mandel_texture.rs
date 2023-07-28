@@ -1,3 +1,4 @@
+use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
 use std::thread;
@@ -9,6 +10,7 @@ use num_complex::Complex;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
+use crate::app_base::RenderInfo;
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
 const TILE_SIZE: u32 = 32;
@@ -182,6 +184,52 @@ impl MandelTexture {
                 };
             });
     }
+
+    pub  fn update_tiles(&self, render_info: &RenderInfo) {
+        self.tiles
+            .iter()
+            .for_each(|tile| {
+                let mut buff: Option<Vec<u8>> = None;
+
+                {
+                    let mut tile_state = tile.state.lock().unwrap();
+                    if let TileState::Ready { buffer } = &mut *tile_state {
+                        let mut new_buff: Vec<u8> = Vec::new();
+                        swap(&mut new_buff, buffer);
+                        buff = Some(new_buff);
+                    }
+                    if matches!(*tile_state, TileState::Ready { .. }) {
+                        *tile_state = TileState::Idle;
+                    }
+                }
+
+                if let Some(buff) = buff {
+                    render_info.queue.write_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &self.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: tile.rect.pos.x,
+                                y: tile.rect.pos.y,
+                                z: 0,
+                            },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &buff,
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: Some(tile.rect.size.x),
+                            rows_per_image: Some(tile.rect.size.y),
+                        },
+                        wgpu::Extent3d {
+                            width: tile.rect.size.x,
+                            height: tile.rect.size.y,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                }
+            });
+    }
 }
 
 
@@ -203,7 +251,7 @@ pub fn mandelbrot(
     let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
 
     // center
-    let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y) ;
+    let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
     let scale = fractal_scale * 0.32;
 
     for y in 0..tile_rect.size.y {

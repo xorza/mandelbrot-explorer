@@ -1,16 +1,14 @@
 #![allow(unused_parens)]
 
-use std::mem::swap;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
-use wgpu::TextureAspect;
 use winit::event_loop::EventLoopProxy;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::mandel_texture::{MandelTexture, TileState};
+use crate::mandel_texture::MandelTexture;
 use crate::math::{RectU32, Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
 
@@ -38,6 +36,7 @@ pub struct TiledFractalApp {
 
     has_update_tiles: bool,
 }
+
 
 #[derive(Debug)]
 pub enum UserEvent {
@@ -226,7 +225,6 @@ impl TiledFractalApp {
                 self.has_update_tiles = true;
                 EventResult::Redraw
             }
-            // _ => EventResult::Continue
         }
     }
 
@@ -252,49 +250,8 @@ impl TiledFractalApp {
             },
         );
     }
-    fn update_tiles(&self, render_info: &RenderInfo) {
-        self.mandel_texture.tiles
-            .iter()
-            .for_each(|tile| {
-                let mut buff: Option<Vec<u8>> = None;
 
-                {
-                    let mut tile_state = tile.state.lock().unwrap();
-                    if let TileState::Ready { buffer } = &mut *tile_state {
-                        let mut new_buff: Vec<u8> = Vec::new();
-                        swap(&mut new_buff, buffer);
-                        buff = Some(new_buff);
-                    }
-                    if matches!(*tile_state, TileState::Ready { .. }) {
-                        *tile_state = TileState::Idle;
-                    }
-                }
-
-                if let Some(buff) = buff {
-                    render_info.queue.write_texture(
-                        wgpu::ImageCopyTexture {
-                            texture: &self.mandel_texture.texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: tile.rect.pos.x,
-                                y: tile.rect.pos.y,
-                                z: 0,
-                            },
-                            aspect: TextureAspect::All,
-                        },
-                        &buff,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(tile.rect.size.x),
-                            rows_per_image: Some(tile.rect.size.y),
-                        },
-                        wgpu::Extent3d {
-                            width: tile.rect.size.x,
-                            height: tile.rect.size.y,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                }
-            });
+    pub fn update_tiles(&self, render_info: &RenderInfo) {
+        self.mandel_texture.update_tiles(render_info);
     }
 }
