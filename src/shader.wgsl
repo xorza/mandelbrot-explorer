@@ -31,4 +31,5 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let r = textureLoad(color, vec2<i32>(vertex.tex_coord), 0).x;
     let clrf = vec4<f32>(r, r, r, 1.0);
     return clrf;
+//    return vec4<f32>(1.0, 0.6, 0.2, 1.0);
 }

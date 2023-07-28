@@ -1,12 +1,16 @@
 #![allow(unused_parens)]
 
+use std::mem::swap;
+use std::sync::{Arc, Mutex};
+
 use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
+use wgpu::TextureAspect;
 use winit::event_loop::EventLoopProxy;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::mandel_texture::MandelTexture;
+use crate::mandel_texture::{MandelTexture, TileState};
 use crate::math::{Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
 
@@ -31,11 +35,16 @@ pub struct TiledFractalApp {
 
     mandel_texture: MandelTexture,
     screen_tex_bind_group: ScreenTexBindGroup,
+
+    has_update_tiles: bool,
 }
 
 #[derive(Debug)]
 pub enum UserEvent {
     Redraw,
+    TileReady {
+        tile_index: usize,
+    },
 }
 
 impl App for TiledFractalApp {
@@ -85,6 +94,8 @@ impl App for TiledFractalApp {
 
             mandel_texture,
             screen_tex_bind_group,
+
+            has_update_tiles: false,
         }
     }
 
@@ -126,6 +137,8 @@ impl App for TiledFractalApp {
             }
 
             Event::Init => {
+                self.render_fractal();
+
                 EventResult::Continue
             }
 
@@ -136,9 +149,14 @@ impl App for TiledFractalApp {
     }
 
     fn render(&mut self, render_info: RenderInfo) {
+        if self.has_update_tiles {
+            self.has_update_tiles = false;
+            self.update_tiles(&render_info);
+        }
+
         self.renderer.go(
             &render_info,
-            &self.screen_tex_bind_group
+            &self.screen_tex_bind_group,
         );
     }
 
@@ -198,8 +216,73 @@ impl TiledFractalApp {
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
         match event {
             UserEvent::Redraw => EventResult::Redraw,
-
+            UserEvent::TileReady { tile_index: _tile_index } => {
+                self.has_update_tiles = true;
+                EventResult::Redraw
+            }
             // _ => EventResult::Continue
         }
+    }
+
+    fn render_fractal(&mut self) {
+        let event_loop_proxy =
+            Arc::new(Mutex::new(self.event_loop.clone()));
+
+        self.mandel_texture.render(
+            &self.runtime,
+            move |index| {
+                event_loop_proxy.lock().unwrap().send_event(
+                    UserEvent::TileReady {
+                        tile_index: index,
+                    }
+                ).unwrap();
+            },
+        );
+    }
+    fn update_tiles(&self, render_info: &RenderInfo) {
+        self.mandel_texture.tiles
+            .iter()
+            .for_each(|tile| {
+                let mut buff: Option<Vec<u8>> = None;
+
+                {
+                    let mut tile_state = tile.state.lock().unwrap();
+                    if let TileState::Ready { buffer } = &mut *tile_state {
+                        let mut new_buff: Vec<u8> = Vec::new();
+                        swap(&mut new_buff, buffer);
+                        buff = Some(new_buff);
+                    }
+                    if matches!(*tile_state, TileState::Ready { .. }) {
+                        *tile_state = TileState::Idle;
+                    }
+                }
+
+                if let Some(buff) = buff {
+                    render_info.queue.write_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &self.mandel_texture.texture,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d {
+                                x: tile.offset.x,
+                                y: tile.offset.y,
+                                z: 0,
+                            },
+                            aspect: TextureAspect::All,
+                        },
+                        &buff,
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row:  Some(tile.size.x),
+                            rows_per_image: Some(tile.size.y),
+                        },
+                        wgpu::Extent3d {
+                            width:  tile.size.x,
+                            height: tile.size.y,
+                            depth_or_array_layers: 1,
+                        },
+                    );
+                    println!("tile updated");
+                }
+            });
     }
 }
