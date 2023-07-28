@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
-const TILE_SIZE: u32 = 128;
+const TILE_SIZE: u32 = 64;
 
 pub enum TileState {
     Idle,
@@ -49,8 +49,8 @@ pub struct MandelTexture {
 impl MandelTexture {
     pub fn new(device: &wgpu::Device) -> Self {
         let tex_size =
-            1024 * 8;
-        // device.limits().max_texture_dimension_2d;
+            // 1024 * 8;
+            device.limits().max_texture_dimension_2d;
         assert!(tex_size >= 1024);
 
         let texture_extent = wgpu::Extent3d {
@@ -112,37 +112,32 @@ impl MandelTexture {
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-
         let mut frame_rect = RectI32::from(frame_rect);
-        frame_rect.pos += Vec2i32::all(300);
+        frame_rect.pos += Vec2i32::all(150);
         frame_rect.size -= Vec2i32::all(300);
 
         let image_offset = self.image_offset;
         let focus = Vec2i32::from(focus);
-        let frame_offset = frame_rect.center() - image_offset;
+        let frame_offset = image_offset - frame_rect.center();
 
         let mut tiles_to_process: Vec<&Tile> = self.tiles
             .iter()
             .filter(|&tile| {
-
                 let mut tile_rect = RectI32::from(tile.rect);
-                tile_rect.pos += frame_offset;
+                tile_rect.pos -= frame_offset;
 
                 frame_rect.intersects(&tile_rect)
             })
             .collect();
 
         tiles_to_process.sort_unstable_by(|&a, &b| {
-            let focus = image_offset;
-
-            let a_center = Vec2i32::from(a.rect.center());
-            let b_center = Vec2i32::from(b.rect.center());
+            let a_center = Vec2i32::from(a.rect.center()) - frame_offset;
+            let b_center = Vec2i32::from(b.rect.center()) - frame_offset;
 
             let a_dist = (a_center - focus).length_squared();
             let b_dist = (b_center - focus).length_squared();
 
             a_dist.partial_cmp(&b_dist).unwrap()
-            // b_dist.partial_cmp(&a_dist).unwrap()
         });
 
         tiles_to_process
@@ -240,10 +235,12 @@ pub fn mandelbrot(
         }
     }
 
-    let elapsed = now.elapsed();
-    let target = Duration::from_millis(400);
-    if elapsed < target {
-        thread::sleep(target - elapsed);
+    if false {
+        let elapsed = now.elapsed();
+        let target = Duration::from_millis(400);
+        if elapsed < target {
+            thread::sleep(target - elapsed);
+        }
     }
 
     Ok(buffer)
