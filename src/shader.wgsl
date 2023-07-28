@@ -18,18 +18,22 @@ fn vs_main(
 ) -> VertexOutput {
     var result: VertexOutput;
     result.position = pc.m * position;
-    result.tex_coord = tex_coord * pc.texture_size;
+    result.tex_coord = tex_coord;
+
     return result;
 }
 
+
+@group(0)
+@binding(0)
+var the_sampler: sampler;
 @group(0)
 @binding(1)
 var color: texture_2d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    let r = textureLoad(color, vec2<i32>(vertex.tex_coord), 0).x;
+    let r = textureSample(color, the_sampler, vertex.tex_coord).r;
     let clrf = vec4<f32>(r, r, r, 1.0);
     return clrf;
-//    return vec4<f32>(1.0, 0.6, 0.2, 1.0);
 }

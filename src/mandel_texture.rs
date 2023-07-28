@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 
 use crate::math::{Vec2f64, Vec2u32};
 
-const TILE_SIZE: u32 = 256;
+const TILE_SIZE: u32 = 128;
 
 pub enum TileState {
     Idle,
@@ -44,8 +44,9 @@ pub struct MandelTexture {
 
 impl MandelTexture {
     pub fn new(device: &wgpu::Device) -> Self {
-        let tex_size = device.limits().max_texture_dimension_2d;
-        assert!(tex_size >= 2048);
+        let tex_size = 1024;
+            // device.limits().max_texture_dimension_2d;
+        assert!(tex_size >= 1024);
 
         let texture_extent = wgpu::Extent3d {
             width: tex_size,

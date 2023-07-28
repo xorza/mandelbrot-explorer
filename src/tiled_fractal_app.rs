@@ -66,6 +66,10 @@ impl App for TiledFractalApp {
             layout: &renderer.bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                },
+                wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&mandel_texture.tex_view),
                 },

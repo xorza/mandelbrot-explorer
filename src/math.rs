@@ -334,9 +334,9 @@ impl Mat4x4f32 {
 
         self
     }
-    pub fn scale(&mut self, factor: f32) -> &mut Self {
-        self.0[0] *= factor;
-        self.0[5] *= factor;
+    pub fn scale(&mut self, factor: Vec2f32) -> &mut Self {
+        self.0[0] *= factor.x;
+        self.0[5] *= factor.y;
 
         self
     }
