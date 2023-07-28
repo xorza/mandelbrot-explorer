@@ -259,6 +259,6 @@ impl TiledFractalApp {
     }
 
     fn update_tiles(&self, render_info: &RenderInfo) {
-        self.mandel_texture.update_tiles(render_info);
+        self.mandel_texture.upload_tiles(render_info);
     }
 }

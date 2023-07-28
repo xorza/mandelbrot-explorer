@@ -1,7 +1,6 @@
 use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -13,7 +12,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
-const TILE_SIZE: u32 = 128;
+const TILE_SIZE: u32 = 32;
 
 pub enum TileState {
     Idle,
@@ -23,7 +22,7 @@ pub enum TileState {
     WaitForUpload {
         buffer: Vec<u8>,
     },
-    Ready
+    Ready,
 }
 
 
@@ -50,10 +49,12 @@ pub struct MandelTexture {
 }
 
 impl MandelTexture {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(
+        device: &wgpu::Device
+    ) -> Self {
         let tex_size =
-            // 1024 * 8;
-            device.limits().max_texture_dimension_2d;
+            1024 * 4;
+        // device.limits().max_texture_dimension_2d;
         assert!(tex_size >= 1024);
 
         let texture_extent = wgpu::Extent3d {
@@ -116,38 +117,42 @@ impl MandelTexture {
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
         let mut frame_rect = frame_rect;
-        // frame_rect.pos += Vec2i32::all(150);
+        frame_rect.pos += self.image_offset - (frame_rect.size / 2) + Vec2i32::all(150);
         frame_rect.size -= Vec2i32::all(300);
 
-        let image_offset = self.image_offset;
-        let focus = Vec2i32::from(focus);
-        let frame_offset = image_offset - (frame_rect.size / 2);
+        // let image_offset =
+        // let frame_offset = image_offset - (frame_rect.size / 2);
 
-        self.tiles.sort_unstable_by(|a, b| {
-            let a_center = Vec2i32::from(a.rect.center()) - frame_offset;
-            let b_center = Vec2i32::from(b.rect.center()) - frame_offset;
-
-            let a_dist = (a_center - focus).length_squared();
-            let b_dist = (b_center - focus).length_squared();
-
-            a_dist.partial_cmp(&b_dist).unwrap()
-        });
+        // let focus = Vec2i32::from(focus) - frame_rect.pos;
+        // self.tiles.sort_unstable_by(|a, b| {
+        //     let a_center = Vec2i32::from(a.rect.center()) - frame_offset;
+        //     let b_center = Vec2i32::from(b.rect.center()) - frame_offset;
+        //
+        //     let a_dist = (a_center - focus).length_squared();
+        //     let b_dist = (b_center - focus).length_squared();
+        //
+        //     a_dist.partial_cmp(&b_dist).unwrap()
+        // });
 
         self.tiles
             .iter()
             .for_each(|tile| {
-                let mut tile_rect = RectI32::from(tile.rect);
-                tile_rect.pos -= frame_offset;
-
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-                if !frame_rect.intersects(&tile_rect) {
-                    if let TileState::Computing { task_handle } = tile_state {
-                        tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        task_handle.abort();
-                        *tile_state = TileState::Idle;
-                    }
+
+                if let TileState::Computing { task_handle } = tile_state {
+                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    task_handle.abort();
+                    *tile_state = TileState::Idle;
+                }
+
+                if !frame_rect.intersects(&RectI32::from(tile.rect)) {
+                    // if let TileState::Computing { task_handle } = tile_state {
+                    //     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    //     task_handle.abort();
+                    //     *tile_state = TileState::Idle;
+                    // }
 
                     return;
                 }
@@ -173,7 +178,9 @@ impl MandelTexture {
                         fractal_offset,
                         fractal_scale,
                         cancel_token,
-                    ).ok();
+                    )
+                        .await
+                        .ok();
 
                     let mut tile_state = tile_state_clone.lock().unwrap();
                     if let Some(buf) = buf {
@@ -193,7 +200,7 @@ impl MandelTexture {
             });
     }
 
-    pub fn update_tiles(&self, render_info: &RenderInfo) {
+    pub fn upload_tiles(&self, render_info: &RenderInfo) {
         self.tiles
             .iter()
             .for_each(|tile| {
@@ -206,42 +213,43 @@ impl MandelTexture {
                         swap(&mut new_buff, buffer);
                         buff = Some(new_buff);
                     }
-                    if matches!(*tile_state, TileState::WaitForUpload { .. }) {
+                    if buff.is_some() {
                         *tile_state = TileState::Ready;
+                    } else {
+                        return;
                     }
                 }
 
-                if let Some(buff) = buff {
-                    render_info.queue.write_texture(
-                        wgpu::ImageCopyTexture {
-                            texture: &self.texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: tile.rect.pos.x,
-                                y: tile.rect.pos.y,
-                                z: 0,
-                            },
-                            aspect: wgpu::TextureAspect::All,
+                let buff = buff.unwrap();
+                render_info.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &self.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: tile.rect.pos.x,
+                            y: tile.rect.pos.y,
+                            z: 0,
                         },
-                        &buff,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(tile.rect.size.x),
-                            rows_per_image: Some(tile.rect.size.y),
-                        },
-                        wgpu::Extent3d {
-                            width: tile.rect.size.x,
-                            height: tile.rect.size.y,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                }
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &buff,
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(tile.rect.size.x),
+                        rows_per_image: Some(tile.rect.size.y),
+                    },
+                    wgpu::Extent3d {
+                        width: tile.rect.size.x,
+                        height: tile.rect.size.y,
+                        depth_or_array_layers: 1,
+                    },
+                );
             });
     }
 }
 
 
-pub fn mandelbrot(
+async fn mandelbrot(
     img_size: Vec2u32,
     tile_rect: RectU32,
     fractal_offset: Vec2f64,
@@ -293,11 +301,12 @@ pub fn mandelbrot(
         }
     }
 
-    if false {
+    if true {
         let elapsed = now.elapsed();
-        let target = Duration::from_millis(400);
+        let target = Duration::from_millis(100);
         if elapsed < target {
-            thread::sleep(target - elapsed);
+            // tokio::time::sleep(target - elapsed).await;
+            // thread::sleep(target - elapsed);
         }
     }
 
