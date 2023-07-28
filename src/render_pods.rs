@@ -2,7 +2,7 @@ use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::math::{Mat4x4f32, Vec2f32};
+use crate::math::Mat4x4f32;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

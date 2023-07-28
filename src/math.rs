@@ -1,5 +1,5 @@
 use std::mem::size_of;
-use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
 use bytemuck::{Pod, Zeroable};
 
@@ -189,7 +189,16 @@ impl From<Vec2f32> for Vec2u32 {
     }
 }
 
+impl Neg for Vec2i32 {
+    type Output = Self;
 
+    fn neg(self) -> Self::Output {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
 impl Add for Vec2i32 {
     type Output = Self;
 
@@ -234,6 +243,14 @@ impl SubAssign for Vec2i32 {
 }
 impl From<Vec2u32> for Vec2i32 {
     fn from(value: Vec2u32) -> Self {
+        Self {
+            x: value.x as i32,
+            y: value.y as i32,
+        }
+    }
+}
+impl From<Vec2f32> for Vec2i32 {
+    fn from(value: Vec2f32) -> Self {
         Self {
             x: value.x as i32,
             y: value.y as i32,
@@ -473,10 +490,10 @@ impl RectI32 {
         }
     }
     pub fn intersects(&self, other: &Self) -> bool {
-          self.pos.x < other.pos.x + other.size.x
-                && self.pos.x + self.size.x > other.pos.x
-                && self.pos.y < other.pos.y + other.size.y
-                && self.pos.y + self.size.y > other.pos.y
+        self.pos.x < other.pos.x + other.size.x
+            && self.pos.x + self.size.x > other.pos.x
+            && self.pos.y < other.pos.y + other.size.y
+            && self.pos.y + self.size.y > other.pos.y
     }
     pub fn center(&self) -> Vec2i32 {
         self.pos + self.size / 2

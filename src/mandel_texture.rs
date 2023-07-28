@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
-const TILE_SIZE: u32 = 32;
+const TILE_SIZE: u32 = 128;
 
 pub enum TileState {
     Idle,
@@ -108,31 +108,21 @@ impl MandelTexture {
     pub fn render<F>(
         &mut self,
         runtime: &Runtime,
-        frame_rect: RectU32,
+        frame_rect: RectI32,
         focus: Vec2u32,
         tile_ready_callback: F,
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        let mut frame_rect = RectI32::from(frame_rect);
-        frame_rect.pos += Vec2i32::all(150);
+        let mut frame_rect = frame_rect;
+        // frame_rect.pos += Vec2i32::all(150);
         frame_rect.size -= Vec2i32::all(300);
 
         let image_offset = self.image_offset;
         let focus = Vec2i32::from(focus);
-        let frame_offset = image_offset - frame_rect.center();
+        let frame_offset = image_offset - (frame_rect.size / 2);
 
-        let mut tiles_to_process: Vec<&Tile> = self.tiles
-            .iter()
-            .filter(|&tile| {
-                let mut tile_rect = RectI32::from(tile.rect);
-                tile_rect.pos -= frame_offset;
-
-                frame_rect.intersects(&tile_rect)
-            })
-            .collect();
-
-        tiles_to_process.sort_unstable_by(|&a, &b| {
+        self.tiles.sort_unstable_by(|a, b| {
             let a_center = Vec2i32::from(a.rect.center()) - frame_offset;
             let b_center = Vec2i32::from(b.rect.center()) - frame_offset;
 
@@ -142,13 +132,26 @@ impl MandelTexture {
             a_dist.partial_cmp(&b_dist).unwrap()
         });
 
-        tiles_to_process
+        self.tiles
             .iter()
-            .for_each(|&tile| {
-                let mut tile_state = tile.state.lock().unwrap();
-                if let TileState::Pending { task_handle } = &*tile_state {
-                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    task_handle.abort();
+            .for_each(|tile| {
+                let mut tile_rect = RectI32::from(tile.rect);
+                tile_rect.pos -= frame_offset;
+
+                let mut tile_state_mutex = tile.state.lock().unwrap();
+                let tile_state = &mut *tile_state_mutex;
+
+                if !frame_rect.intersects(&tile_rect) {
+                    if let TileState::Pending { task_handle } = tile_state {
+                        tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        task_handle.abort();
+                    }
+                    *tile_state = TileState::Idle;
+                    return;
+                }
+
+                if matches!(tile_state, TileState::Pending {..}) {
+                    return;
                 }
 
                 let img_size = self.size;
@@ -170,12 +173,15 @@ impl MandelTexture {
                         cancel_token,
                     ).ok();
 
+                    let mut tile_state = tile_state_clone.lock().unwrap();
                     if let Some(buf) = buf {
-                        let mut tile_state = tile_state_clone.lock().unwrap();
                         *tile_state = TileState::Ready {
                             buffer: buf,
                         };
                         (callback)(tile_index);
+                        println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
+                    } else {
+                        *tile_state = TileState::Idle;
                     }
                 });
 
@@ -185,7 +191,7 @@ impl MandelTexture {
             });
     }
 
-    pub  fn update_tiles(&self, render_info: &RenderInfo) {
+    pub fn update_tiles(&self, render_info: &RenderInfo) {
         self.tiles
             .iter()
             .for_each(|tile| {
@@ -255,11 +261,13 @@ pub fn mandelbrot(
     let scale = fractal_scale * 0.32;
 
     for y in 0..tile_rect.size.y {
-        if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
-            return Err(anyhow!("Cancelled"));
-        }
-
         for x in 0..tile_rect.size.x {
+            if x % 32 == 0 {
+                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
+                    return Err(anyhow!("Cancelled"));
+                }
+            }
+
             let cx = ((x + tile_rect.pos.x) as f64) / width;
             let cy = ((y + tile_rect.pos.y) as f64) / (aspect * height);
 

@@ -9,7 +9,7 @@ use winit::event_loop::EventLoopProxy;
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
-use crate::math::{RectU32, Vec2f32, Vec2f64, Vec2i32, Vec2u32};
+use crate::math::{RectI32, Vec2f32, Vec2f64, Vec2i32, Vec2u32};
 use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
 
 enum ManipulateState {
@@ -159,9 +159,13 @@ impl App for TiledFractalApp {
             self.update_tiles(&render_info);
         }
 
+        let offset = self.draft_offset / Vec2f32::from(self.window_size);
+
         self.renderer.go(
             &render_info,
             &self.screen_tex_bind_group,
+            offset,
+            self.draft_scale,
         );
     }
 
@@ -177,32 +181,32 @@ impl App for TiledFractalApp {
 
 impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
-        let mouse_pos = Vec2f32::from(mouse_pos)
+        let mouse_pos = Vec2u32::new(mouse_pos.x, self.window_size.y - mouse_pos.y);
+        let mouse_pos_f = Vec2f32::from(mouse_pos)
             / Vec2f32::from(self.window_size);
-        let mouse_pos = Vec2f32::new(mouse_pos.x, 1.0 - mouse_pos.y);
 
-        let mouse_delta = Vec2f32::from(mouse_delta)
-            / Vec2f32::from(self.window_size);
+        let mouse_delta = Vec2f32::from(mouse_delta);
         let mouse_delta = Vec2f32::new(mouse_delta.x, -mouse_delta.y);
 
         let zoom = 1.15f32.powf(scroll_delta / 5.0);
 
         {
             let old_final_scale = self.final_scale;
-            let new_final_scale = old_final_scale / zoom as f64;
+            let new_final_scale = old_final_scale * zoom as f64;
 
             let old_offset = self.final_offset;
             let new_offset =
                 Vec2f64::from(mouse_delta) * new_final_scale
                     + old_offset
-                    + (Vec2f64::from(mouse_pos) - 0.5) * (new_final_scale - old_final_scale);
+                // + (Vec2f64::from(mouse_pos_f) - 0.5) * (new_final_scale - old_final_scale)
+                ;
 
             self.final_scale = new_final_scale;
             self.final_offset = new_offset;
         }
 
         {
-            let mouse_pos = mouse_pos * 2.0f32 - 1.0f32;
+            let mouse_pos = mouse_pos_f * 2.0f32 - 1.0f32;
 
             let old_draft_scale = self.draft_scale;
             let new_draft_scale = old_draft_scale * zoom;
@@ -216,6 +220,8 @@ impl TiledFractalApp {
             self.draft_scale = new_draft_scale;
             self.draft_offset = new_draft_offset;
         }
+
+        self.render_fractal(mouse_pos);
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
@@ -232,15 +238,16 @@ impl TiledFractalApp {
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
-        let screen_rect = RectU32::new(
-            Vec2u32::zeroed(),
-            self.window_size,
+        let frame_rect = RectI32::new(
+            -Vec2i32::from(self.draft_offset),
+            Vec2i32::from(self.window_size),
         );
+
 
         self.mandel_texture.render(
             &self.runtime,
-            screen_rect,
-            screen_rect.center(),
+            frame_rect,
+            focus,
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {
@@ -251,7 +258,7 @@ impl TiledFractalApp {
         );
     }
 
-    pub fn update_tiles(&self, render_info: &RenderInfo) {
+    fn update_tiles(&self, render_info: &RenderInfo) {
         self.mandel_texture.update_tiles(render_info);
     }
 }
