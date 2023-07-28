@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
-const TILE_SIZE: u32 = 64;
+const TILE_SIZE: u32 = 32;
 
 pub enum TileState {
     Idle,
@@ -203,8 +203,8 @@ pub fn mandelbrot(
     let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
 
     // center
-    let offset = Vec2f64::new(fractal_offset.x + 0.19, fractal_offset.y) * 3.7;
-    let scale = fractal_scale * 3.7;
+    let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y) ;
+    let scale = fractal_scale * 0.32;
 
     for y in 0..tile_rect.size.y {
         if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
@@ -215,8 +215,8 @@ pub fn mandelbrot(
             let cx = ((x + tile_rect.pos.x) as f64) / width;
             let cy = ((y + tile_rect.pos.y) as f64) / (aspect * height);
 
-            let cx = (cx - 0.5) * scale - offset.x;
-            let cy = (cy - 0.5) * scale - offset.y;
+            let cx = (cx - 0.5) / scale - offset.x;
+            let cy = (cy - 0.5) / scale - offset.y;
 
             let cx = cx * aspect;
 

@@ -61,7 +61,8 @@ impl App for TiledFractalApp {
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
         let mut mandel_texture = MandelTexture::new(device);
-        mandel_texture.fractal_scale = mandel_texture.size.x as f64 / window_size.x as f64;
+        mandel_texture.fractal_scale = window_size.x as f64 / mandel_texture.size.x as f64;
+        mandel_texture.fractal_scale *= 1.0;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -142,7 +143,7 @@ impl App for TiledFractalApp {
             }
 
             Event::Init => {
-                self.render_fractal();
+                self.render_fractal(self.window_size / 2);
 
                 EventResult::Continue
             }
@@ -229,7 +230,7 @@ impl TiledFractalApp {
         }
     }
 
-    fn render_fractal(&mut self) {
+    fn render_fractal(&mut self, focus: Vec2u32) {
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
