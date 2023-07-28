@@ -72,7 +72,7 @@ impl App for TiledFractalApp {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&mandel_texture.tex_view),
+                    resource: wgpu::BindingResource::TextureView(&mandel_texture.texture_view1),
                 },
             ],
             label: None,

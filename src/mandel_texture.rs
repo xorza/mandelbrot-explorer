@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
 
-const TILE_SIZE: u32 = 32;
+const TILE_SIZE: u32 = 64;
 
 pub enum TileState {
     Idle,
@@ -34,8 +34,11 @@ pub struct Tile {
 }
 
 pub struct MandelTexture {
-    pub texture: wgpu::Texture,
-    pub tex_view: wgpu::TextureView,
+    pub texture1: wgpu::Texture,
+    pub texture2: wgpu::Texture,
+    pub texture_view1: wgpu::TextureView,
+    pub texture_view2: wgpu::TextureView,
+
     pub size: Vec2u32,
 
     pub max_iter: u32,
@@ -62,7 +65,7 @@ impl MandelTexture {
             height: tex_size,
             depth_or_array_layers: 1,
         };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let texture1 = device.create_texture(&wgpu::TextureDescriptor {
             size: texture_extent,
             mip_level_count: 1,
             sample_count: 1,
@@ -72,7 +75,18 @@ impl MandelTexture {
             view_formats: &[],
             label: None,
         });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture_view1 = texture1.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture2 = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+            label: None,
+        });
+        let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
         assert_eq!(tex_size % TILE_SIZE, 0);
         let tile_count = tex_size / TILE_SIZE;
@@ -96,8 +110,10 @@ impl MandelTexture {
         let image_offset = Vec2i32::all(tex_size as i32 / 2);
 
         Self {
-            texture,
-            tex_view: texture_view,
+            texture1,
+            texture_view1,
+            texture2,
+            texture_view2,
             size: Vec2u32::new(tex_size, tex_size),
             max_iter: 100,
             tiles,
@@ -117,22 +133,21 @@ impl MandelTexture {
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
         let mut frame_rect = frame_rect;
-        frame_rect.pos += self.image_offset - (frame_rect.size / 2) + Vec2i32::all(150);
+        frame_rect.pos += self.image_offset - (frame_rect.size / 2);
+        let focus = Vec2i32::from(focus) + frame_rect.pos;
+
+        frame_rect.pos += Vec2i32::all(150);
         frame_rect.size -= Vec2i32::all(300);
 
-        // let image_offset =
-        // let frame_offset = image_offset - (frame_rect.size / 2);
+        self.tiles.sort_unstable_by(|a, b| {
+            let a_center = Vec2i32::from(a.rect.center());
+            let b_center = Vec2i32::from(b.rect.center());
 
-        // let focus = Vec2i32::from(focus) - frame_rect.pos;
-        // self.tiles.sort_unstable_by(|a, b| {
-        //     let a_center = Vec2i32::from(a.rect.center()) - frame_offset;
-        //     let b_center = Vec2i32::from(b.rect.center()) - frame_offset;
-        //
-        //     let a_dist = (a_center - focus).length_squared();
-        //     let b_dist = (b_center - focus).length_squared();
-        //
-        //     a_dist.partial_cmp(&b_dist).unwrap()
-        // });
+            let a_dist = (a_center - focus).length_squared();
+            let b_dist = (b_center - focus).length_squared();
+
+            a_dist.partial_cmp(&b_dist).unwrap()
+        });
 
         self.tiles
             .iter()
@@ -140,19 +155,20 @@ impl MandelTexture {
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-
-                if let TileState::Computing { task_handle } = tile_state {
-                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    task_handle.abort();
-                    *tile_state = TileState::Idle;
-                }
-
-                if !frame_rect.intersects(&RectI32::from(tile.rect)) {
+                {
                     // if let TileState::Computing { task_handle } = tile_state {
                     //     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     //     task_handle.abort();
-                    //     *tile_state = TileState::Idle;
                     // }
+                    // *tile_state = TileState::Idle;
+                }
+
+                if !frame_rect.intersects(&RectI32::from(tile.rect)) {
+                    if let TileState::Computing { task_handle } = tile_state {
+                        tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        task_handle.abort();
+                        *tile_state = TileState::Idle;
+                    }
 
                     return;
                 }
@@ -223,7 +239,7 @@ impl MandelTexture {
                 let buff = buff.unwrap();
                 render_info.queue.write_texture(
                     wgpu::ImageCopyTexture {
-                        texture: &self.texture,
+                        texture: &self.texture1,
                         mip_level: 0,
                         origin: wgpu::Origin3d {
                             x: tile.rect.pos.x,
@@ -268,7 +284,7 @@ async fn mandelbrot(
 
     // center
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
-    let scale = fractal_scale * 0.32;
+    let scale = fractal_scale * 1.32;
 
     for y in 0..tile_rect.size.y {
         for x in 0..tile_rect.size.x {
@@ -301,7 +317,7 @@ async fn mandelbrot(
         }
     }
 
-    if true {
+    if false {
         let elapsed = now.elapsed();
         let target = Duration::from_millis(100);
         if elapsed < target {
