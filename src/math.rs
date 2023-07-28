@@ -1,23 +1,24 @@
+use std::mem::size_of;
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable, Default)]
 pub struct Vec2u32 {
     pub x: u32,
     pub y: u32,
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable, Default)]
 pub struct Vec2i32 {
     pub x: i32,
     pub y: i32,
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable, Default)]
 pub struct Vec4u32 {
     pub x: u32,
     pub y: u32,
@@ -47,6 +48,10 @@ pub struct Vec2f64 {
     pub x: f64,
     pub y: f64,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+pub struct Mat4x4f32([f32; 16]);
 
 
 impl Vec2f32 {
@@ -313,3 +318,39 @@ impl From<Vec2u32> for Vec2f32 {
         }
     }
 }
+
+
+impl Mat4x4f32 {
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
+    }
+    pub fn size_in_bytes() -> u32 {
+        size_of::<Mat4x4f32>() as u32
+    }
+
+    pub fn translate2d(&mut self, vec: Vec2f32) -> &mut Self {
+        self.0[12] += vec.x * self.0[0];
+        self.0[13] += vec.y * self.0[5];
+
+        self
+    }
+    pub fn scale(&mut self, factor: f32) -> &mut Self {
+        self.0[0] *= factor;
+        self.0[5] *= factor;
+
+        self
+    }
+}
+impl Default for Mat4x4f32 {
+    fn default() -> Self {
+        Self([
+            // @formatter:off
+            1.0, 0.0, 0.0, 0.0, // 1st column
+            0.0, 1.0, 0.0, 0.0, // 2nd column
+            0.0, 0.0, 1.0, 0.0, // 3rd column
+            0.0, 0.0, 0.0, 1.0, // 4th column
+            // @formatter:on
+        ])
+    }
+}
+

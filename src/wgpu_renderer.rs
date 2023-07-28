@@ -4,22 +4,19 @@ use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::math::{Vec2f32, Vec2u32};
-use crate::render_pods::{PushConst, ScreenRect, TextureSize};
+use crate::math::Vec2u32;
+use crate::render_pods::{PushConst, ScreenRect};
 
-struct ScreenTexBindGroup {
-    bind_group: BindGroup,
-    texture: Texture,
-    texture_view: TextureView,
-    texture_size: TextureSize,
+pub struct ScreenTexBindGroup {
+    pub bind_group: BindGroup,
+    pub texture_size: Vec2u32,
 }
 
-pub(crate) struct WgpuRenderer {
-    window_size: Vec2u32,
-    screen_rect_buf: Buffer,
-    bind_group_layout: BindGroupLayout,
-    pipeline: RenderPipeline,
-    screen_tex_bind_group: Option<ScreenTexBindGroup>,
+pub struct WgpuRenderer {
+    pub window_size: Vec2u32,
+    pub screen_rect_buf: Buffer,
+    pub bind_group_layout: BindGroupLayout,
+    pub pipeline: RenderPipeline,
 }
 
 
@@ -115,62 +112,65 @@ impl WgpuRenderer {
             screen_rect_buf,
             bind_group_layout,
             pipeline,
-            screen_tex_bind_group: None,
         }
     }
 
-    pub fn update_texture(
+    // pub fn update_texture(
+    //     &mut self,
+    //     render_info: &RenderInfo,
+    //     tex_size: Vec2u32,
+    //     texels: &[u8],
+    // ) {
+    //     let texture_extent = Extent3d {
+    //         width: tex_size.x,
+    //         height: tex_size.y,
+    //         depth_or_array_layers: 1,
+    //     };
+    //     let texture = render_info.device.create_texture(&TextureDescriptor {
+    //         size: texture_extent,
+    //         mip_level_count: 1,
+    //         sample_count: 1,
+    //         dimension: TextureDimension::D2,
+    //         format: TextureFormat::R8Unorm,
+    //         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+    //         view_formats: &[],
+    //         label: None,
+    //     });
+    //     let texture_view = texture.create_view(&TextureViewDescriptor::default());
+    //     render_info.queue.write_texture(
+    //         texture.as_image_copy(),
+    //         &texels,
+    //         ImageDataLayout {
+    //             offset: 0,
+    //             bytes_per_row: Some(tex_size.x),
+    //             rows_per_image: Some(tex_size.y),
+    //         },
+    //         texture_extent,
+    //     );
+    //     let bind_group = render_info.device.create_bind_group(&BindGroupDescriptor {
+    //         layout: &self.bind_group_layout,
+    //         entries: &[
+    //             BindGroupEntry {
+    //                 binding: 1,
+    //                 resource: BindingResource::TextureView(&texture_view),
+    //             },
+    //         ],
+    //         label: None,
+    //     });
+    //
+    //     self.screen_tex_bind_group = Some(ScreenTexBindGroup {
+    //         bind_group,
+    //         texture,
+    //         texture_view,
+    //         texture_size: TextureSize::from(tex_size),
+    //     });
+    // }
+
+    pub fn go(
         &mut self,
-        render_info: &RenderInfo,
-        tex_size: Vec2u32,
-        texels: &[u8],
+        render: &RenderInfo,
+        screen_tex_bind_group: &ScreenTexBindGroup,
     ) {
-        let texture_extent = Extent3d {
-            width: tex_size.x,
-            height: tex_size.y,
-            depth_or_array_layers: 1,
-        };
-        let texture = render_info.device.create_texture(&TextureDescriptor {
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::R8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-            label: None,
-        });
-        let texture_view = texture.create_view(&TextureViewDescriptor::default());
-        render_info.queue.write_texture(
-            texture.as_image_copy(),
-            &texels,
-            ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(tex_size.x),
-                rows_per_image: Some(tex_size.y),
-            },
-            texture_extent,
-        );
-        let bind_group = render_info.device.create_bind_group(&BindGroupDescriptor {
-            layout: &self.bind_group_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&texture_view),
-                },
-            ],
-            label: None,
-        });
-
-        self.screen_tex_bind_group = Some(ScreenTexBindGroup {
-            bind_group,
-            texture,
-            texture_view,
-            texture_size: TextureSize::from(tex_size),
-        });
-    }
-
-    pub fn go(&mut self, render: &RenderInfo, offset: Vec2f32, scale: f32) {
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
 
@@ -193,25 +193,22 @@ impl WgpuRenderer {
                     }
                 );
 
-            if let Some(screen_tex_bind_group) = self.screen_tex_bind_group.as_ref() {
-                render_pass.set_pipeline(&self.pipeline);
-                render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
-                let mut pc = PushConst::new(screen_tex_bind_group.texture_size);
-                pc.m
-                    .translate2d(offset)
-                    .scale(scale)
-                ;
+            let pc = PushConst::new(screen_tex_bind_group.texture_size);
+            // pc.m
+            //     .translate2d(offset)
+            //     .scale(scale);
 
-                render_pass.set_push_constants(
-                    wgpu::ShaderStages::VERTEX,
-                    0,
-                    pc.as_bytes(),
-                );
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                pc.as_bytes(),
+            );
 
-                render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);
-                render_pass.draw(0..ScreenRect::vert_count(), 0..1);
-            }
+            render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);
+            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 
         render.queue.submit(Some(command_encoder.finish()));

@@ -1,24 +1,21 @@
 #![allow(unused_parens)]
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::mandelbrot::mandelbrot1;
+use crate::mandel_texture::MandelTexture;
 use crate::math::{Vec2f32, Vec2f64, Vec2i32, Vec2u32};
-use crate::wgpu_renderer::WgpuRenderer;
+use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
 
 enum ManipulateState {
     Idle,
     Drag,
 }
 
-pub struct FractalApp {
+pub struct TiledFractalApp {
     window_size: Vec2u32,
     renderer: WgpuRenderer,
     event_loop: EventLoopProxy<UserEvent>,
@@ -32,21 +29,16 @@ pub struct FractalApp {
     draft_offset: Vec2f32,
     draft_scale: f32,
 
-    cancel_token: Arc<AtomicU32>,
-
-    updated_texture: Option<(Vec2u32, Vec<u8>)>,
+    mandel_texture: MandelTexture,
+    screen_tex_bind_group: ScreenTexBindGroup,
 }
 
 #[derive(Debug)]
 pub enum UserEvent {
     Redraw,
-    UpdateTexture {
-        size: Vec2u32,
-        texels: Vec<u8>,
-    },
 }
 
-impl App for FractalApp {
+impl App for TiledFractalApp {
     type UserEventType = UserEvent;
 
     fn new(
@@ -54,10 +46,28 @@ impl App for FractalApp {
         queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
         event_loop_proxy: EventLoopProxy<UserEvent>,
-    ) -> FractalApp
+    ) -> TiledFractalApp
     {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
+
+        let mandel_texture = MandelTexture::new(device);
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &renderer.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&mandel_texture.tex_view),
+                },
+            ],
+            label: None,
+        });
+
+        let screen_tex_bind_group = ScreenTexBindGroup {
+            bind_group,
+            texture_size: mandel_texture.size,
+        };
 
         Self {
             window_size,
@@ -73,8 +83,8 @@ impl App for FractalApp {
             draft_offset: Vec2f32::zeroed(),
             draft_scale: 1.0f32,
 
-            cancel_token: Arc::new(AtomicU32::new(0)),
-            updated_texture: None,
+            mandel_texture,
+            screen_tex_bind_group,
         }
     }
 
@@ -85,7 +95,6 @@ impl App for FractalApp {
 
             Event::MouseWheel(position, delta) => {
                 self.move_scale(position, Vec2i32::zeroed(), delta);
-                self.rerender();
 
                 EventResult::Redraw
             }
@@ -94,7 +103,6 @@ impl App for FractalApp {
                     ManipulateState::Idle => EventResult::Continue,
                     ManipulateState::Drag => {
                         self.move_scale(position, delta, 0.0);
-                        self.rerender();
 
                         EventResult::Redraw
                     }
@@ -114,15 +122,10 @@ impl App for FractalApp {
             }
 
             Event::Custom(event) => {
-                if matches!(event, UserEvent::Redraw) {
-                    EventResult::Redraw
-                } else {
-                    self.update_user_event(event)
-                }
+                self.update_user_event(event)
             }
 
             Event::Init => {
-                self.rerender();
                 EventResult::Continue
             }
 
@@ -133,14 +136,10 @@ impl App for FractalApp {
     }
 
     fn render(&mut self, render_info: RenderInfo) {
-        if let Some((tex_size, texels)) = self.updated_texture.take() {
-            self.renderer.update_texture(&render_info, tex_size, texels.as_slice());
-
-            self.draft_scale = 1.0f32;
-            self.draft_offset = Vec2f32::zeroed();
-        }
-
-        self.renderer.go(&render_info, self.draft_offset, self.draft_scale);
+        self.renderer.go(
+            &render_info,
+            &self.screen_tex_bind_group
+        );
     }
 
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32) {
@@ -150,11 +149,10 @@ impl App for FractalApp {
 
         self.window_size = window_size;
         self.renderer.resize(device, queue, window_size);
-        self.rerender();
     }
 }
 
-impl FractalApp {
+impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
         let mouse_pos = Vec2f32::from(mouse_pos)
             / Vec2f32::from(self.window_size);
@@ -199,39 +197,9 @@ impl FractalApp {
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
         match event {
-            UserEvent::UpdateTexture { size, texels } => {
-                self.updated_texture = Some((size, texels));
+            UserEvent::Redraw => EventResult::Redraw,
 
-                EventResult::Redraw
-            }
-
-            _ => EventResult::Continue
+            // _ => EventResult::Continue
         }
-    }
-
-    fn rerender(&mut self) {
-        self.cancel_token.fetch_add(1, Ordering::Relaxed);
-
-        let event_loop = self.event_loop.clone();
-        let window_size = self.window_size;
-        let scale = self.final_scale;
-        let offset = self.final_offset;
-        let cancel_token = self.cancel_token.clone();
-
-        self.runtime.spawn(async move {
-            let tex_scale = 1.0f32;
-            let tex_size = tex_scale * Vec2f32::from(window_size);
-            let tex_size = Vec2u32::from(tex_size);
-
-            let texels = mandelbrot1(tex_size, offset, scale, cancel_token)
-                .ok();
-
-            if let Some(texels) = texels {
-                event_loop.send_event(UserEvent::UpdateTexture {
-                    size: tex_size,
-                    texels,
-                }).unwrap();
-            }
-        });
     }
 }
