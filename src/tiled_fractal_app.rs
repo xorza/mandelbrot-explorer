@@ -56,7 +56,7 @@ impl App for TiledFractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let mut mandel_texture = MandelTexture::new(device, window_size);
+        let mandel_texture = MandelTexture::new(device, window_size);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -158,7 +158,7 @@ impl App for TiledFractalApp {
         }
 
         let offset =
-            -self.frame_rect.center()
+            -2.0 * self.frame_rect.center() / self.aspect
             // -2.0 * self.frame_rect.center() / self.aspect
             // / (self.mandel_texture.fractal_rect.size)
             // Vec2f64::zeroed();
@@ -189,7 +189,7 @@ impl TiledFractalApp {
         let mouse_pos = mouse_pos - 0.5f64;
 
         let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
-        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y) / self.aspect;
+        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
@@ -222,13 +222,18 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self) {
-        println!("frame_rect: {:?}", self.frame_rect);
+        // println!("frame_rect: {:?}", self.frame_rect);
+
+        let frame_rect = RectF64::new(
+            self.frame_rect.pos + 0.1 * self.frame_rect.size,
+            0.8 * self.frame_rect.size,
+        );
 
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
         self.mandel_texture.update(
-            self.frame_rect,
+            frame_rect,
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {
