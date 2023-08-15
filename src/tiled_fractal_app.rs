@@ -57,7 +57,6 @@ impl App for TiledFractalApp {
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
         let mut mandel_texture = MandelTexture::new(device);
-        mandel_texture.fractal_scale = window_size.x as f64 / mandel_texture.tex_size.x as f64;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -88,7 +87,7 @@ impl App for TiledFractalApp {
             manipulate_state: ManipulateState::Idle,
 
             offset: Vec2f64::zeroed(),
-            scale: 0.25f64,
+            scale: 0.15f64,
 
             mandel_texture,
             screen_tex_bind_group,
