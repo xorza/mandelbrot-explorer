@@ -43,7 +43,8 @@ pub struct MandelTexture {
     pub tiles: Vec<Tile>,
     pub fractal_rect: RectF64,
 
-    initial_scale: f64,
+    fractal_scale: f64,
+
 }
 
 impl MandelTexture {
@@ -95,13 +96,14 @@ impl MandelTexture {
 
         let runtime = Runtime::new().unwrap();
 
-        let initial_scale = 0.44*window_size.y as f64 / tex_size as f64;
         let fractal_size = Vec2f64::all(tex_size as f64) / Vec2f64::from(window_size);
         let fractal_size = fractal_size.y;
         let fractal_rect = RectF64::new(
             Vec2f64::all(-fractal_size / 2.0),
             Vec2f64::all(fractal_size),
         );
+
+        let fractal_scale = 0.43 * window_size.y as f64 / tex_size as f64;
 
         Self {
             texture1,
@@ -114,7 +116,7 @@ impl MandelTexture {
             tiles,
 
             fractal_rect,
-            initial_scale,
+            fractal_scale,
         }
     }
 
@@ -142,7 +144,8 @@ impl MandelTexture {
         });
 
         let fractal_rect = self.fractal_rect;
-        let initial_scale = self.initial_scale;
+        let fractal_scale = self.fractal_scale;
+        let fractal_scale = self.fractal_scale;
 
         self.tiles
             .iter()
@@ -151,11 +154,11 @@ impl MandelTexture {
                 let tile_state = &mut *tile_state_mutex;
 
                 {
-                    // if let TileState::Computing { task_handle } = tile_state {
-                    //     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    //     task_handle.abort();
-                    // }
-                    // *tile_state = TileState::Idle;
+                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if let TileState::Computing { task_handle } = tile_state {
+                        task_handle.abort();
+                    }
+                    *tile_state = TileState::Idle;
                 }
 
 
@@ -189,7 +192,7 @@ impl MandelTexture {
                         img_size,
                         tile_rect,
                         fractal_rect.center(),
-                        initial_scale,
+                        fractal_scale,
                         cancel_token,
                     )
                         .await
@@ -201,7 +204,7 @@ impl MandelTexture {
                             buffer: buf,
                         };
                         (callback)(tile_index);
-                        println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
+                        // println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
                     } else {
                         *tile_state = TileState::Idle;
                     }

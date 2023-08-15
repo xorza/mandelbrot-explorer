@@ -200,11 +200,11 @@ impl TiledFractalApp {
 
         let old_offset = self.frame_rect.pos;
         let new_offset =
-            old_offset
-                - mouse_delta * self.frame_rect.size;
-        // old_offset
-        //     + mouse_delta * new_scale
-        //     - mouse_pos * (new_scale - old_scale);
+            // old_offset
+            //     - mouse_delta * self.frame_rect.size;
+        old_offset
+            - mouse_delta * new_scale
+            + mouse_pos * (new_scale - old_scale);
 
         self.frame_rect.pos = new_offset;
 
@@ -222,11 +222,11 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self) {
-        // println!("frame_rect: {:?}", self.frame_rect);
+        println!("frame_rect: {:?}", self.frame_rect);
 
         let frame_rect = RectF64::new(
-            self.frame_rect.pos + 0.1 * self.frame_rect.size,
-            0.8 * self.frame_rect.size,
+            self.frame_rect.pos + 0.05 * self.frame_rect.size,
+            0.9 * self.frame_rect.size,
         );
 
         let event_loop_proxy =
