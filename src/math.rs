@@ -59,11 +59,19 @@ pub struct RectU32 {
     pub pos: Vec2u32,
     pub size: Vec2u32,
 }
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct RectI32 {
     pub pos: Vec2i32,
     pub size: Vec2i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct RectF64 {
+    pub pos: Vec2f64,
+    pub size: Vec2f64,
 }
 
 
@@ -82,6 +90,10 @@ impl Vec2f64 {
     }
     pub fn all(v: f64) -> Self {
         Self { x: v, y: v }
+    }
+
+    pub fn length_squared(self) -> f64 {
+        self.x * self.x + self.y * self.y
     }
 }
 
@@ -188,6 +200,14 @@ impl From<Vec2f32> for Vec2u32 {
         }
     }
 }
+impl From<Vec2f64> for Vec2u32 {
+    fn from(value: Vec2f64) -> Self {
+        Self {
+            x: value.x as u32,
+            y: value.y as u32,
+        }
+    }
+}
 impl From<Vec2i32> for Vec2u32 {
     fn from(value: Vec2i32) -> Self {
         Self {
@@ -265,12 +285,30 @@ impl From<Vec2f32> for Vec2i32 {
         }
     }
 }
+impl From<Vec2f64> for Vec2i32 {
+    fn from(value: Vec2f64) -> Self {
+        Self {
+            x: value.x as i32,
+            y: value.y as i32,
+        }
+    }
+}
 
 
 impl AddAssign for Vec2f64 {
     fn add_assign(&mut self, rhs: Self) {
         self.x += rhs.x;
         self.y += rhs.y;
+    }
+}
+impl Neg for Vec2f64 {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
     }
 }
 impl Add for Vec2f64 {
@@ -290,6 +328,16 @@ impl Div for Vec2f64 {
         Self {
             x: self.x / rhs.x,
             y: self.y / rhs.y,
+        }
+    }
+}
+impl Sub for Vec2f64 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
         }
     }
 }
@@ -320,6 +368,16 @@ impl Sub<f64> for Vec2f64 {
         Vec2f64 {
             x: self.x - scalar,
             y: self.y - scalar,
+        }
+    }
+}
+impl Mul<Vec2f64> for f64 {
+    type Output = Vec2f64;
+
+    fn mul(self, vec: Vec2f64) -> Self::Output {
+        Vec2f64 {
+            x: vec.x * self,
+            y: vec.y * self,
         }
     }
 }
@@ -435,6 +493,14 @@ impl From<Vec2u32> for Vec2f32 {
         }
     }
 }
+impl From<Vec2f64> for Vec2f32 {
+    fn from(value: Vec2f64) -> Self {
+        Self {
+            x: value.x as f32,
+            y: value.y as f32,
+        }
+    }
+}
 
 
 impl Mat4x4f32 {
@@ -470,6 +536,7 @@ impl Default for Mat4x4f32 {
         ])
     }
 }
+
 
 impl RectU32 {
     pub fn new(pos: Vec2u32, size: Vec2u32) -> Self {
@@ -513,5 +580,44 @@ impl From<RectU32> for RectI32 {
             pos: value.pos.into(),
             size: value.size.into(),
         }
+    }
+}
+
+
+impl RectF64 {
+    pub fn new(pos: Vec2f64, size: Vec2f64) -> Self {
+        Self {
+            pos,
+            size,
+        }
+    }
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.pos.x < other.pos.x + other.size.x
+            && self.pos.x + self.size.x > other.pos.x
+            && self.pos.y < other.pos.y + other.size.y
+            && self.pos.y + self.size.y > other.pos.y
+    }
+    pub fn center(&self) -> Vec2f64 {
+        self.pos + self.size / 2.0
+    }
+}
+
+
+impl std::fmt::Debug for RectF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RectF64 {{ pos: ({:.3}, {:.3}), size: ({:.3}, {:.3}) }}",
+            self.pos.x, self.pos.y, self.size.x, self.size.y
+        )
+    }
+}
+impl std::fmt::Display for RectF64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "pos: ({:.3}, {:.3}), size: ({:.3}, {:.3})",
+            self.pos.x, self.pos.y, self.size.x, self.size.y
+        )
     }
 }

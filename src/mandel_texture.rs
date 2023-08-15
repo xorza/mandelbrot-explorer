@@ -10,7 +10,7 @@ use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
 use crate::app_base::RenderInfo;
-use crate::math::{RectI32, RectU32, Vec2f64, Vec2i32, Vec2u32};
+use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
 
 const TILE_SIZE: u32 = 64;
 
@@ -35,10 +35,7 @@ pub struct Tile {
 
 pub struct MandelTexture {
     pub texture1: wgpu::Texture,
-    pub texture2: wgpu::Texture,
     pub texture_view1: wgpu::TextureView,
-    pub texture_view2: wgpu::TextureView,
-
 
     runtime: Runtime,
 
@@ -51,10 +48,8 @@ pub struct MandelTexture {
     pub fractal_offset: Vec2f64,
     pub fractal_scale: f64,
 
-    pub image_offset: Vec2i32,
-
-    frame_rect: RectI32,
-    focus: Vec2i32,
+    frame_rect: RectF64,
+    focus: Vec2f64,
 }
 
 impl MandelTexture {
@@ -82,17 +77,6 @@ impl MandelTexture {
             label: None,
         });
         let texture_view1 = texture1.create_view(&wgpu::TextureViewDescriptor::default());
-        let texture2 = device.create_texture(&wgpu::TextureDescriptor {
-            size: texture_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-            label: None,
-        });
-        let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
         assert_eq!(tex_size % TILE_SIZE, 0);
         let tile_count = tex_size / TILE_SIZE;
@@ -113,55 +97,44 @@ impl MandelTexture {
             }
         }
 
-        let image_offset = Vec2i32::all(tex_size as i32 / 2);
-
         let runtime = Runtime::new().unwrap();
 
         Self {
             texture1,
             texture_view1,
-            texture2,
-            texture_view2,
+
             runtime,
+
             size: Vec2u32::new(tex_size, tex_size),
             max_iter: 100,
             tiles,
+
             fractal_offset: Vec2f64::zeroed(),
             fractal_scale: 1.0,
-            image_offset,
 
-            frame_rect: RectI32::zeroed(),
-            focus: Vec2i32::zeroed(),
+            frame_rect: RectF64::zeroed(),
+            focus: Vec2f64::zeroed(),
         }
     }
 
-    pub fn pan(&mut self,
-               frame_rect: RectI32,
-               focus: Vec2u32,
-    ) {
-        let mut frame_rect = frame_rect;
-        frame_rect.pos += self.image_offset - (frame_rect.size / 2);
-        let focus = Vec2i32::from(focus) + frame_rect.pos;
-
-        frame_rect.pos += Vec2i32::all(150);
-        frame_rect.size -= Vec2i32::all(300);
-
-        self.frame_rect = frame_rect;
-        self.focus = focus;
-    }
-
-    pub fn render<F>(
+    pub fn update<F>(
         &mut self,
+        frame_rect: RectF64,
         tile_ready_callback: F,
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        let frame_rect = self.frame_rect;
-        let focus = self.focus;
+        let focus = frame_rect.center();
+
+        // frame_rect.pos += Vec2f64::all(150);
+        // frame_rect.size -= Vec2f64::all(300);
+
+        self.frame_rect = frame_rect;
+        self.focus = focus;
 
         self.tiles.sort_unstable_by(|a, b| {
-            let a_center = Vec2i32::from(a.rect.center());
-            let b_center = Vec2i32::from(b.rect.center());
+            let a_center = Vec2f64::from(a.rect.center());
+            let b_center = Vec2f64::from(b.rect.center());
 
             let a_dist = (a_center - focus).length_squared();
             let b_dist = (b_center - focus).length_squared();
@@ -183,14 +156,14 @@ impl MandelTexture {
                     // *tile_state = TileState::Idle;
                 }
 
-                if !frame_rect.intersects(&RectI32::from(tile.rect)) {
+                if !frame_rect.intersects(&tile.fractal_rect(self.fractal_offset, self.fractal_scale)) {
                     if let TileState::Computing { task_handle } = tile_state {
                         tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         task_handle.abort();
                         *tile_state = TileState::Idle;
                     }
 
-                    return;
+                    // return;
                 }
 
                 if !matches!(tile_state, TileState::Idle) {
@@ -284,6 +257,14 @@ impl MandelTexture {
     }
 }
 
+impl Tile {
+    pub(crate) fn fractal_rect(&self, offset: Vec2f64, scale: f64) -> RectF64 {
+        let pos = Vec2f64::from(self.rect.pos);
+        let size = Vec2f64::from(self.rect.size);
+
+        RectF64::new(pos, size)
+    }
+}
 
 async fn mandelbrot(
     img_size: Vec2u32,

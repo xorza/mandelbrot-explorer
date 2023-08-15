@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::math::{Vec2f32, Vec2u32};
+use crate::math::{Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
 
 pub struct ScreenTexBindGroup {
@@ -135,8 +135,7 @@ impl WgpuRenderer {
         &mut self,
         render_info: &RenderInfo,
         screen_tex_bind_group: &ScreenTexBindGroup,
-        offset: Vec2f32,
-        scale: f32,
+        offset: Vec2f64,
     ) {
         let tex_size = Vec2f32::from(screen_tex_bind_group.texture_size);
         let win_size = Vec2f32::from(self.window_size);
@@ -171,7 +170,7 @@ impl WgpuRenderer {
 
             let mut pc = PushConst::new();
             pc.proj_mat
-                 .translate2d(offset)
+                .translate2d(Vec2f32::from(offset))
                 .scale(scale);
 
             render_pass.set_push_constants(
