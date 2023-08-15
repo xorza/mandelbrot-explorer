@@ -28,7 +28,7 @@ pub enum TileState {
 
 pub struct Tile {
     pub index: usize,
-    pub rect: RectU32,
+    pub tex_rect: RectU32,
     pub state: Arc<Mutex<TileState>>,
     pub cancel_token: Arc<AtomicU32>,
 }
@@ -39,7 +39,7 @@ pub struct MandelTexture {
 
     runtime: Runtime,
 
-    pub size: Vec2u32,
+    pub tex_size: Vec2u32,
 
     pub max_iter: u32,
 
@@ -90,7 +90,7 @@ impl MandelTexture {
                 };
                 tiles.push(Tile {
                     index,
-                    rect,
+                    tex_rect: rect,
                     state: Arc::new(Mutex::new(TileState::Idle)),
                     cancel_token: Arc::new(AtomicU32::new(0)),
                 });
@@ -105,7 +105,7 @@ impl MandelTexture {
 
             runtime,
 
-            size: Vec2u32::new(tex_size, tex_size),
+            tex_size: Vec2u32::new(tex_size, tex_size),
             max_iter: 100,
             tiles,
 
@@ -133,8 +133,8 @@ impl MandelTexture {
         self.focus = focus;
 
         self.tiles.sort_unstable_by(|a, b| {
-            let a_center = Vec2f64::from(a.rect.center());
-            let b_center = Vec2f64::from(b.rect.center());
+            let a_center = Vec2f64::from(a.tex_rect.center());
+            let b_center = Vec2f64::from(b.tex_rect.center());
 
             let a_dist = (a_center - focus).length_squared();
             let b_dist = (b_center - focus).length_squared();
@@ -156,7 +156,9 @@ impl MandelTexture {
                     // *tile_state = TileState::Idle;
                 }
 
-                if !frame_rect.intersects(&tile.fractal_rect(self.fractal_offset, self.fractal_scale)) {
+                let tile_rect = tile.fractal_rect(self.tex_size, self.fractal_offset, self.fractal_scale);
+
+                if !frame_rect.intersects(&tile_rect) {
                     if let TileState::Computing { task_handle } = tile_state {
                         tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         task_handle.abort();
@@ -170,8 +172,8 @@ impl MandelTexture {
                     return;
                 }
 
-                let img_size = self.size;
-                let tile_rect = tile.rect;
+                let img_size = self.tex_size;
+                let tile_rect = tile.tex_rect;
                 let fractal_offset = self.fractal_offset;
                 let fractal_scale = self.fractal_scale;
                 let tile_index = tile.index;
@@ -235,8 +237,8 @@ impl MandelTexture {
                         texture: &self.texture1,
                         mip_level: 0,
                         origin: wgpu::Origin3d {
-                            x: tile.rect.pos.x,
-                            y: tile.rect.pos.y,
+                            x: tile.tex_rect.pos.x,
+                            y: tile.tex_rect.pos.y,
                             z: 0,
                         },
                         aspect: wgpu::TextureAspect::All,
@@ -244,12 +246,12 @@ impl MandelTexture {
                     &buff,
                     wgpu::ImageDataLayout {
                         offset: 0,
-                        bytes_per_row: Some(tile.rect.size.x),
-                        rows_per_image: Some(tile.rect.size.y),
+                        bytes_per_row: Some(tile.tex_rect.size.x),
+                        rows_per_image: Some(tile.tex_rect.size.y),
                     },
                     wgpu::Extent3d {
-                        width: tile.rect.size.x,
-                        height: tile.rect.size.y,
+                        width: tile.tex_rect.size.x,
+                        height: tile.tex_rect.size.y,
                         depth_or_array_layers: 1,
                     },
                 );
@@ -258,11 +260,17 @@ impl MandelTexture {
 }
 
 impl Tile {
-    pub(crate) fn fractal_rect(&self, offset: Vec2f64, scale: f64) -> RectF64 {
-        let pos = Vec2f64::from(self.rect.pos);
-        let size = Vec2f64::from(self.rect.size);
+    pub(crate) fn fractal_rect(&self, frame_size: Vec2u32, offset: Vec2f64, scale: f64) -> RectF64 {
+        let abs_frame_size = Vec2f64::from(frame_size);
+        let abs_tile_pos = Vec2f64::from(self.tex_rect.pos);
+        let abs_tile_size = Vec2f64::from(self.tex_rect.size);
 
-        RectF64::new(pos, size)
+        let tile_pos =
+            offset + abs_tile_pos / abs_frame_size - 0.5f64;
+        let tile_size =
+            scale * abs_tile_size / abs_frame_size;
+
+        RectF64::new(tile_pos, tile_size)
     }
 }
 
