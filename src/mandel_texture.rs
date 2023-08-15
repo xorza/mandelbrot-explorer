@@ -49,8 +49,9 @@ impl MandelTexture {
         device: &wgpu::Device
     ) -> Self {
         let tex_size =
-            1024 * 4;
-        // device.limits().max_texture_dimension_2d;
+            1024 * 2
+            // device.limits().max_texture_dimension_2d
+            ;
         assert!(tex_size >= 1024);
 
         let texture_extent = wgpu::Extent3d {
@@ -119,7 +120,7 @@ impl MandelTexture {
     {
         let focus = frame_rect.center();
 
-        let mut frame_rect = frame_rect;
+        // let mut frame_rect = frame_rect;
         // frame_rect.pos += 0.01f64 * frame_rect.size;
         // frame_rect.size *= 0.5f64;
 
@@ -153,14 +154,14 @@ impl MandelTexture {
                     *tile_state = TileState::Idle;
                 }
 
-                let tile_rect =
-                    tile.fractal_rect(
-                        self.tex_size,
-                        self.fractal_rect,
-                    );
-                if !frame_rect.intersects(&tile_rect) {
-                    // return;
-                }
+                // let tile_rect =
+                //     tile.fractal_rect(
+                //         self.tex_size,
+                //         self.fractal_rect,
+                //     );
+                // if !frame_rect.intersects(&tile_rect) {
+                // return;
+                // }
 
                 // if !matches!(tile_state, TileState::Idle) {
                 //     return;
@@ -179,7 +180,7 @@ impl MandelTexture {
                         img_size,
                         tile_rect,
                         frame_rect.center(),
-                        0.1,
+                        0.25,
                         cancel_token,
                     )
                         .await
@@ -274,14 +275,14 @@ async fn mandelbrot(
     cancel_token: Arc<AtomicU32>,
 ) -> anyhow::Result<Vec<u8>>
 {
+    let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
+
     let now = Instant::now();
 
     let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
     let width = img_size.x as f64;
     let height = img_size.y as f64;
     let aspect = width / height;
-
-    let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
 
     // center
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
@@ -295,13 +296,13 @@ async fn mandelbrot(
                 }
             }
 
-            let cx = ((x + tile_rect.pos.x) as f64) / width;
-            let cy = ((y + tile_rect.pos.y) as f64) / (aspect * height);
+            let cx = ((x + tile_rect.pos.x) as f64) * aspect / width;
+            let cy = ((y + tile_rect.pos.y) as f64) / height;
 
             let cx = (cx - 0.5) / scale - offset.x;
             let cy = (cy - 0.5) / scale - offset.y;
 
-            let cx = cx * aspect;
+            // let cx = cx * aspect;
 
             let c: Complex<f64> = Complex::new(cx, cy);
             let mut z: Complex<f64> = Complex::new(0.0, 0.0);

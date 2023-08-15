@@ -26,6 +26,7 @@ pub struct TiledFractalApp {
     manipulate_state: ManipulateState,
 
     frame_rect: RectF64,
+    aspect: Vec2f64,
 
     mandel_texture: MandelTexture,
     screen_tex_bind_group: ScreenTexBindGroup,
@@ -77,10 +78,10 @@ impl App for TiledFractalApp {
             texture_size: mandel_texture.tex_size,
         };
 
-        let frame_size = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
+        let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
         let frame_rect = RectF64::new(
-            -frame_size / 2.0,
-            frame_size,
+            -aspect / 2.0,
+            aspect,
         );
 
         Self {
@@ -92,6 +93,7 @@ impl App for TiledFractalApp {
             manipulate_state: ManipulateState::Idle,
 
             frame_rect,
+            aspect,
 
             mandel_texture,
             screen_tex_bind_group,
@@ -181,22 +183,25 @@ impl TiledFractalApp {
         let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
         let mouse_pos = mouse_pos * 2.0f64 - 1.0f64;
 
-        let mouse_delta = 2.0f64 * Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
+        let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
         let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
-        // let old_scale = self.scale;
-        // let new_scale = old_scale * zoom;
-        //
-        // let old_offset = self.offset;
-        // let new_offset =
-        //     old_offset
-        //         + mouse_delta * new_scale
-        //         - mouse_pos * (new_scale - old_scale);
-        //
-        // self.scale = new_scale;
-        // self.offset = new_offset;
+        let old_scale = self.frame_rect.size.y;
+        let new_scale = old_scale * zoom;
+        self.frame_rect.size = new_scale * self.aspect;
+
+
+        let old_offset = self.frame_rect.pos;
+        let new_offset =
+            old_offset
+                +mouse_delta * self.frame_rect.size;
+        // old_offset
+        //     + mouse_delta * new_scale
+        //     - mouse_pos * (new_scale - old_scale);
+
+        self.frame_rect.pos = new_offset;
 
         self.update_fractal();
     }
@@ -212,12 +217,6 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self) {
-        // let size = self.scale * Vec2f64::new(self.window_size.x as f64 / self.window_size.y as f64, 1.0);
-        // let frame_rect = RectF64::new(
-        //     self.offset - size / 2.0f64,
-        //     size,
-        // );
-
         println!("frame_rect: {:?}", self.frame_rect);
 
         let event_loop_proxy =
