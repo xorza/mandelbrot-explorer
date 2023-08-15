@@ -157,10 +157,13 @@ impl App for TiledFractalApp {
             self.update_tiles(&render_info);
         }
 
-        let offset = -self.frame_rect.center()
+        let offset =
+            -self.frame_rect.center()
+            // -2.0 * self.frame_rect.center() / self.aspect
             // / (self.mandel_texture.fractal_rect.size)
+            // Vec2f64::zeroed();
             ;
-        // let offset = Vec2f64::zeroed();
+
 
         self.renderer.go(
             &render_info,
@@ -186,7 +189,7 @@ impl TiledFractalApp {
         let mouse_pos = mouse_pos * 2.0f64 - 1.0f64;
 
         let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
-        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
+        let mouse_delta = 2.0 * Vec2f64::new(mouse_delta.x, -mouse_delta.y) / self.aspect;
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 

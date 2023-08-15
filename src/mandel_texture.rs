@@ -285,7 +285,6 @@ async fn mandelbrot(
     let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
     let width = img_size.x as f64;
     let height = img_size.y as f64;
-    let aspect = width / height;
 
     // center
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
@@ -299,13 +298,11 @@ async fn mandelbrot(
                 }
             }
 
-            let cx = ((x + tile_rect.pos.x) as f64) * aspect / width;
+            let cx = ((x + tile_rect.pos.x) as f64) / width;
             let cy = ((y + tile_rect.pos.y) as f64) / height;
 
             let cx = (cx - 0.5) / scale - offset.x;
             let cy = (cy - 0.5) / scale - offset.y;
-
-            // let cx = cx * aspect;
 
             let c: Complex<f64> = Complex::new(cx, cy);
             let mut z: Complex<f64> = Complex::new(0.0, 0.0);
