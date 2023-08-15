@@ -285,7 +285,7 @@ async fn mandelbrot(
 
     // center
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
-    let scale = fractal_scale * 1.32;
+    let scale = fractal_scale;
 
     for y in 0..tile_rect.size.y {
         for x in 0..tile_rect.size.x {

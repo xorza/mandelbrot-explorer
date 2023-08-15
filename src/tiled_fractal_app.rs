@@ -25,8 +25,7 @@ pub struct TiledFractalApp {
 
     manipulate_state: ManipulateState,
 
-    offset: Vec2f64,
-    scale: f64,
+    frame_rect: RectF64,
 
     mandel_texture: MandelTexture,
     screen_tex_bind_group: ScreenTexBindGroup,
@@ -78,6 +77,12 @@ impl App for TiledFractalApp {
             texture_size: mandel_texture.tex_size,
         };
 
+        let frame_size = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
+        let frame_rect = RectF64::new(
+            -frame_size / 2.0,
+            frame_size,
+        );
+
         Self {
             window_size,
             renderer,
@@ -86,8 +91,7 @@ impl App for TiledFractalApp {
 
             manipulate_state: ManipulateState::Idle,
 
-            offset: Vec2f64::zeroed(),
-            scale: 1.0f64,
+            frame_rect,
 
             mandel_texture,
             screen_tex_bind_group,
@@ -182,17 +186,17 @@ impl TiledFractalApp {
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
-        let old_scale = self.scale;
-        let new_scale = old_scale * zoom;
-
-        let old_offset = self.offset;
-        let new_offset =
-            old_offset
-                + mouse_delta * new_scale
-                - mouse_pos * (new_scale - old_scale);
-
-        self.scale = new_scale;
-        self.offset = new_offset;
+        // let old_scale = self.scale;
+        // let new_scale = old_scale * zoom;
+        //
+        // let old_offset = self.offset;
+        // let new_offset =
+        //     old_offset
+        //         + mouse_delta * new_scale
+        //         - mouse_pos * (new_scale - old_scale);
+        //
+        // self.scale = new_scale;
+        // self.offset = new_offset;
 
         self.update_fractal();
     }
@@ -208,19 +212,19 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self) {
-        let size = self.scale * Vec2f64::new(self.window_size.x as f64 / self.window_size.y as f64, 1.0);
-        let frame_rect = RectF64::new(
-            self.offset - size / 2.0f64,
-            size,
-        );
+        // let size = self.scale * Vec2f64::new(self.window_size.x as f64 / self.window_size.y as f64, 1.0);
+        // let frame_rect = RectF64::new(
+        //     self.offset - size / 2.0f64,
+        //     size,
+        // );
 
-        println!("frame_rect: {:?}", frame_rect);
+        println!("frame_rect: {:?}", self.frame_rect);
 
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
         self.mandel_texture.update(
-            frame_rect,
+            self.frame_rect,
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {
