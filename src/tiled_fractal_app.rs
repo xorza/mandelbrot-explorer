@@ -58,7 +58,6 @@ impl App for TiledFractalApp {
 
         let mut mandel_texture = MandelTexture::new(device);
         mandel_texture.fractal_scale = window_size.x as f64 / mandel_texture.tex_size.x as f64;
-        mandel_texture.fractal_scale *= 1.0;
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -89,7 +88,7 @@ impl App for TiledFractalApp {
             manipulate_state: ManipulateState::Idle,
 
             offset: Vec2f64::zeroed(),
-            scale: 1.0f64,
+            scale: 0.25f64,
 
             mandel_texture,
             screen_tex_bind_group,
@@ -212,11 +211,11 @@ impl TiledFractalApp {
     fn update_fractal(&mut self) {
         let size = self.scale * Vec2f64::new(self.window_size.x as f64 / self.window_size.y as f64, 1.0);
         let frame_rect = RectF64::new(
-            self.offset,
+            self.offset - size / 2.0f64,
             size,
         );
 
-        // println!("frame_rect: {:?}", frame_rect);
+        println!("frame_rect: {:?}", frame_rect);
 
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));

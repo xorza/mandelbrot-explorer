@@ -47,9 +47,6 @@ pub struct MandelTexture {
 
     pub fractal_offset: Vec2f64,
     pub fractal_scale: f64,
-
-    frame_rect: RectF64,
-    focus: Vec2f64,
 }
 
 impl MandelTexture {
@@ -111,9 +108,6 @@ impl MandelTexture {
 
             fractal_offset: Vec2f64::zeroed(),
             fractal_scale: 1.0,
-
-            frame_rect: RectF64::zeroed(),
-            focus: Vec2f64::zeroed(),
         }
     }
 
@@ -126,11 +120,12 @@ impl MandelTexture {
     {
         let focus = frame_rect.center();
 
-        // frame_rect.pos += Vec2f64::all(150);
-        // frame_rect.size -= Vec2f64::all(300);
+        let mut frame_rect = frame_rect;
+        // frame_rect.pos += 0.01f64 * frame_rect.size;
+        // frame_rect.size *= 0.5f64;
 
-        self.frame_rect = frame_rect;
-        self.focus = focus;
+        self.fractal_offset = frame_rect.center();
+        self.fractal_scale = frame_rect.size.x;
 
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = Vec2f64::from(a.tex_rect.center());
@@ -156,21 +151,25 @@ impl MandelTexture {
                     // *tile_state = TileState::Idle;
                 }
 
-                let tile_rect = tile.fractal_rect(self.tex_size, self.fractal_offset, self.fractal_scale);
-
-                if !frame_rect.intersects(&tile_rect) {
-                    if let TileState::Computing { task_handle } = tile_state {
-                        tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        task_handle.abort();
-                        *tile_state = TileState::Idle;
-                    }
-
-                    // return;
+                if let TileState::Computing { task_handle } = tile_state {
+                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    task_handle.abort();
+                    *tile_state = TileState::Idle;
                 }
 
-                if !matches!(tile_state, TileState::Idle) {
+                let tile_rect =
+                    tile.fractal_rect(
+                        self.tex_size,
+                        self.fractal_offset,
+                        self.fractal_scale,
+                    );
+                if !frame_rect.intersects(&tile_rect) {
                     return;
                 }
+
+                // if !matches!(tile_state, TileState::Idle) {
+                //     return;
+                // }
 
                 let img_size = self.tex_size;
                 let tile_rect = tile.tex_rect;
@@ -199,7 +198,7 @@ impl MandelTexture {
                             buffer: buf,
                         };
                         (callback)(tile_index);
-                        println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
+                        // println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
                     } else {
                         *tile_state = TileState::Idle;
                     }
@@ -268,7 +267,7 @@ impl Tile {
         let tile_pos =
             offset + abs_tile_pos / abs_frame_size - 0.5f64;
         let tile_size =
-            scale * abs_tile_size / abs_frame_size;
+            abs_tile_size / (scale * abs_frame_size);
 
         RectF64::new(tile_pos, tile_size)
     }
