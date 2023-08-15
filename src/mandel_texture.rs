@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
 
-const TILE_SIZE: u32 = 64;
+const TILE_SIZE: u32 = 128;
 
 pub enum TileState {
     Idle,
@@ -24,7 +24,6 @@ pub enum TileState {
     Ready,
 }
 
-
 pub struct Tile {
     pub index: usize,
     pub tex_rect: RectU32,
@@ -36,16 +35,16 @@ pub struct MandelTexture {
     pub texture1: wgpu::Texture,
     pub texture_view1: wgpu::TextureView,
 
+    window_size: Vec2u32,
+
     runtime: Runtime,
 
     pub tex_size: Vec2u32,
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
     pub fractal_rect: RectF64,
-
-    fractal_scale: f64,
-
 }
+
 
 impl MandelTexture {
     pub fn new(
@@ -103,11 +102,12 @@ impl MandelTexture {
             Vec2f64::all(fractal_size),
         );
 
-        let fractal_scale = 0.43 * window_size.y as f64 / tex_size as f64;
 
         Self {
             texture1,
             texture_view1,
+
+            window_size,
 
             runtime,
 
@@ -116,7 +116,6 @@ impl MandelTexture {
             tiles,
 
             fractal_rect,
-            fractal_scale,
         }
     }
 
@@ -129,10 +128,6 @@ impl MandelTexture {
     {
         let focus = frame_rect.center();
 
-        // let mut frame_rect = frame_rect;
-        // frame_rect.pos += 0.01f64 * frame_rect.size;
-        // frame_rect.size *= 0.5f64;
-
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = Vec2f64::from(a.tex_rect.center());
             let b_center = Vec2f64::from(b.tex_rect.center());
@@ -144,8 +139,7 @@ impl MandelTexture {
         });
 
         let fractal_rect = self.fractal_rect;
-        let fractal_scale = self.fractal_scale;
-        let fractal_scale = self.fractal_scale;
+
 
         self.tiles
             .iter()
@@ -160,7 +154,6 @@ impl MandelTexture {
                     }
                     *tile_state = TileState::Idle;
                 }
-
 
                 let tile_rect = tile.fractal_rect(
                     self.tex_size,
@@ -192,7 +185,7 @@ impl MandelTexture {
                         img_size,
                         tile_rect,
                         fractal_rect.center(),
-                        fractal_scale,
+                        0.005 * fractal_rect.size.length_squared(),
                         cancel_token,
                     )
                         .await
@@ -216,7 +209,7 @@ impl MandelTexture {
             });
     }
 
-    pub fn upload_tiles(&self, render_info: &RenderInfo) {
+    pub fn render(&self, render_info: &RenderInfo) {
         self.tiles
             .iter()
             .for_each(|tile| {
@@ -262,6 +255,10 @@ impl MandelTexture {
                 );
             });
     }
+
+    pub fn resize_window(&mut self, window_size: Vec2u32) {
+        self.window_size = window_size;
+    }
 }
 
 impl Tile {
@@ -280,6 +277,7 @@ impl Tile {
     }
 }
 
+//noinspection RsConstantConditionIf
 async fn mandelbrot(
     img_size: Vec2u32,
     tile_rect: RectU32,

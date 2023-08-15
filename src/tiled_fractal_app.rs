@@ -179,6 +179,7 @@ impl App for TiledFractalApp {
 
         self.window_size = window_size;
         self.renderer.resize(device, queue, window_size);
+        self.mandel_texture.resize_window(window_size);
     }
 }
 
@@ -186,7 +187,7 @@ impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
         let mouse_pos = Vec2i32::new(mouse_pos.x as i32, self.window_size.y as i32 - mouse_pos.y as i32);
         let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
-        let mouse_pos = mouse_pos - 0.5f64;
+        // let mouse_pos = mouse_pos - 0.5f64;
 
         let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
         let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
@@ -202,9 +203,9 @@ impl TiledFractalApp {
         let new_offset =
             // old_offset
             //     - mouse_delta * self.frame_rect.size;
-        old_offset
-            - mouse_delta * new_scale
-            + mouse_pos * (new_scale - old_scale);
+            old_offset
+                - mouse_delta * new_scale
+                + mouse_pos * old_offset * (new_scale - old_scale);
 
         self.frame_rect.pos = new_offset;
 
@@ -245,6 +246,6 @@ impl TiledFractalApp {
     }
 
     fn update_tiles(&self, render_info: &RenderInfo) {
-        self.mandel_texture.upload_tiles(render_info);
+        self.mandel_texture.render(render_info);
     }
 }
