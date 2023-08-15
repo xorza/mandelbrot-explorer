@@ -56,7 +56,7 @@ impl App for TiledFractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let mut mandel_texture = MandelTexture::new(device);
+        let mut mandel_texture = MandelTexture::new(device, window_size);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &renderer.bind_group_layout,
@@ -186,10 +186,10 @@ impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
         let mouse_pos = Vec2i32::new(mouse_pos.x as i32, self.window_size.y as i32 - mouse_pos.y as i32);
         let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
-        let mouse_pos = mouse_pos * 2.0f64 - 1.0f64;
+        let mouse_pos = mouse_pos - 0.5f64;
 
         let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
-        let mouse_delta = 2.0 * Vec2f64::new(mouse_delta.x, -mouse_delta.y) / self.aspect;
+        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y) / self.aspect;
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
