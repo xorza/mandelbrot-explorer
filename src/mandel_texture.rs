@@ -178,8 +178,8 @@ impl MandelTexture {
                     let buf = mandelbrot(
                         img_size,
                         tile_rect,
-                        frame_rect.pos,
-                        frame_rect.size.x,
+                        frame_rect.center(),
+                        0.1,
                         cancel_token,
                     )
                         .await
@@ -191,7 +191,7 @@ impl MandelTexture {
                             buffer: buf,
                         };
                         (callback)(tile_index);
-                        println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
+                        // println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
                     } else {
                         *tile_state = TileState::Idle;
                     }

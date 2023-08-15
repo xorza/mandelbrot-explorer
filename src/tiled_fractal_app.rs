@@ -87,7 +87,7 @@ impl App for TiledFractalApp {
             manipulate_state: ManipulateState::Idle,
 
             offset: Vec2f64::zeroed(),
-            scale: 0.15f64,
+            scale: 1.0f64,
 
             mandel_texture,
             screen_tex_bind_group,
