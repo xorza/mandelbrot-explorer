@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicU32;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
+use bytemuck::Zeroable;
 use num_complex::Complex;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
@@ -95,13 +96,6 @@ impl MandelTexture {
 
         let runtime = Runtime::new().unwrap();
 
-        let fractal_size = Vec2f64::all(tex_size as f64) / Vec2f64::from(window_size);
-        let fractal_size = fractal_size.y;
-        let fractal_rect = RectF64::new(
-            Vec2f64::all(-fractal_size / 2.0),
-            Vec2f64::all(fractal_size),
-        );
-
 
         Self {
             texture1,
@@ -111,11 +105,11 @@ impl MandelTexture {
 
             runtime,
 
-            tex_size: Vec2u32::new(tex_size, tex_size),
+            tex_size: Vec2u32::all(tex_size),
             max_iter: 100,
             tiles,
 
-            fractal_rect,
+            fractal_rect: RectF64::zeroed(),
         }
     }
 
@@ -126,20 +120,30 @@ impl MandelTexture {
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        let focus = frame_rect.center();
+        // let focus = frame_rect.center();
+        // self.tiles.sort_unstable_by(|a, b| {
+        //     let a_center = Vec2f64::from(a.tex_rect.center());
+        //     let b_center = Vec2f64::from(b.tex_rect.center());
+        //
+        //     let a_dist = (a_center - focus).length_squared();
+        //     let b_dist = (b_center - focus).length_squared();
+        //
+        //     a_dist.partial_cmp(&b_dist).unwrap()
+        // });
 
-        self.tiles.sort_unstable_by(|a, b| {
-            let a_center = Vec2f64::from(a.tex_rect.center());
-            let b_center = Vec2f64::from(b.tex_rect.center());
+        let a = Vec2f64::from(self.tex_size) / Vec2f64::from(self.window_size);
+        let b = self.fractal_rect.size / frame_rect.size;
+        let c = a.length_squared() != b.length_squared();
+        if c {
+            self.fractal_rect = RectF64::new(
+                frame_rect.pos - frame_rect.size * a / 2.0,
+                frame_rect.size * a,
+            );
+            println!("fractal_rect: {:?}", self.fractal_rect);
+        }
 
-            let a_dist = (a_center - focus).length_squared();
-            let b_dist = (b_center - focus).length_squared();
-
-            a_dist.partial_cmp(&b_dist).unwrap()
-        });
 
         let fractal_rect = self.fractal_rect;
-
 
         self.tiles
             .iter()
@@ -147,7 +151,7 @@ impl MandelTexture {
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-                {
+                if c {
                     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let TileState::Computing { task_handle } = tile_state {
                         task_handle.abort();

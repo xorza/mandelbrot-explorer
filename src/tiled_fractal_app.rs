@@ -158,10 +158,11 @@ impl App for TiledFractalApp {
         }
 
         let offset =
-            -2.0 * self.frame_rect.center() / self.aspect
+         2.0*   (self.mandel_texture.fractal_rect.pos - self.frame_rect.pos)
+                // / self.mandel_texture.fractal_rect.size
             // -2.0 * self.frame_rect.center() / self.aspect
             // / (self.mandel_texture.fractal_rect.size)
-            // Vec2f64::zeroed();
+            // Vec2f64::zeroed()
             ;
 
 
@@ -223,11 +224,11 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self) {
-        println!("frame_rect: {:?}", self.frame_rect);
+        // println!("frame_rect: {:?}", self.frame_rect);
 
         let frame_rect = RectF64::new(
-            self.frame_rect.pos + 0.05 * self.frame_rect.size,
-            0.9 * self.frame_rect.size,
+            self.frame_rect.pos + 0.1 * self.frame_rect.size,
+            0.8 * self.frame_rect.size,
         );
 
         let event_loop_proxy =

@@ -170,6 +170,16 @@ impl Mul for Vec2u32 {
         }
     }
 }
+impl Div for Vec2u32 {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x / rhs.x,
+            y: self.y / rhs.y,
+        }
+    }
+}
 impl Div<u32> for Vec2u32 {
     type Output = Vec2u32;
 
