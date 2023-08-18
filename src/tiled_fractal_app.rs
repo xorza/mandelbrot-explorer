@@ -140,7 +140,7 @@ impl App for TiledFractalApp {
             }
 
             Event::Init => {
-                self.update_fractal();
+                self.update_fractal(self.frame_rect.center());
 
                 EventResult::Continue
             }
@@ -206,7 +206,10 @@ impl TiledFractalApp {
             new_size,
         );
 
-        self.update_fractal();
+        let focus = self.frame_rect.center()
+            + self.frame_rect.size * mouse_pos;
+
+        self.update_fractal(focus);
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
@@ -219,19 +222,13 @@ impl TiledFractalApp {
         }
     }
 
-    fn update_fractal(&mut self) {
-        // println!("frame_rect: {:?}", self.frame_rect);
-
-        let frame_rect = RectF64::pos_size(
-            self.frame_rect.pos,
-            self.frame_rect.size,
-        );
-
+    fn update_fractal(&mut self, focus: Vec2f64) {
         let event_loop_proxy =
             Arc::new(Mutex::new(self.event_loop.clone()));
 
         self.mandel_texture.update(
-            frame_rect,
+            self.frame_rect,
+            focus,
             move |index| {
                 event_loop_proxy.lock().unwrap().send_event(
                     UserEvent::TileReady {

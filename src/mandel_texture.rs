@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
 
-const TILE_SIZE: u32 = 128;
+const TILE_SIZE: u32 = 16;
 
 pub enum TileState {
     Idle,
@@ -116,26 +116,15 @@ impl MandelTexture {
     pub fn update<F>(
         &mut self,
         frame_rect: RectF64,
+        focus: Vec2f64,
         tile_ready_callback: F,
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        // let focus = frame_rect.center();
-        // self.tiles.sort_unstable_by(|a, b| {
-        //     let a_center = Vec2f64::from(a.tex_rect.center());
-        //     let b_center = Vec2f64::from(b.tex_rect.center());
-        //
-        //     let a_dist = (a_center - focus).length_squared();
-        //     let b_dist = (b_center - focus).length_squared();
-        //
-        //     a_dist.partial_cmp(&b_dist).unwrap()
-        // });
-
         let a = self.tex_size.x as f64 / self.window_size.x as f64;
         let b = self.fractal_rect.size.x / frame_rect.size.x;
         let scale_changed =
-            (a - b).abs() > f64::EPSILON
-            ;
+            (a - b).abs() > f64::EPSILON;
         if scale_changed {
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
@@ -147,6 +136,22 @@ impl MandelTexture {
 
 
         let fractal_rect = self.fractal_rect;
+
+        self.tiles.sort_unstable_by(|a, b| {
+            let a_center = a.fractal_rect(
+                self.tex_size,
+                fractal_rect,
+            ).center();
+            let b_center = b.fractal_rect(
+                self.tex_size,
+                fractal_rect,
+            ).center();
+
+            let a_dist = (a_center - focus).length_squared();
+            let b_dist = (b_center - focus).length_squared();
+
+            a_dist.partial_cmp(&b_dist).unwrap()
+        });
 
         self.tiles
             .iter()
