@@ -212,14 +212,13 @@ impl MandelTexture {
                         .await
                         .ok();
 
-                    let mut tile_state = tile_state_clone.lock().unwrap();
+
                     if let Some(buf) = buf {
+                        let mut tile_state = tile_state_clone.lock().unwrap();
                         *tile_state = TileState::WaitForUpload {
                             buffer: buf,
                         };
                         (callback)(tile_index);
-                    } else {
-                        *tile_state = TileState::Idle;
                     }
                 });
 
