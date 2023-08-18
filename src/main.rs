@@ -9,7 +9,6 @@ mod event;
 mod math;
 mod wgpu_renderer;
 mod render_pods;
-mod mandelbrot;
 mod mandel_texture;
 mod tiled_fractal_app;
 

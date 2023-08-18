@@ -175,9 +175,15 @@ impl App for TiledFractalApp {
             return;
         }
 
+        self.frame_rect = RectF64::center_size(
+            self.frame_rect.center(),
+            self.frame_rect.size * Vec2f64::from(window_size) / Vec2f64::from(self.window_size),
+        );
         self.window_size = window_size;
         self.renderer.resize(device, queue, window_size);
         self.mandel_texture.resize_window(window_size);
+
+        self.update_fractal(self.frame_rect.center());
     }
 }
 

@@ -128,9 +128,9 @@ impl MandelTexture {
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        let scale_changed = frame_rect.size.y != self.fractal_scale;
+        let scale_changed = frame_rect.size.length_squared() != self.fractal_scale;
         if scale_changed {
-            self.fractal_scale = frame_rect.size.y;
+            self.fractal_scale = frame_rect.size.length_squared();
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
                 Vec2f64::all(frame_rect.size.x * self.tex_size.x as f64 / self.window_size.x as f64),
