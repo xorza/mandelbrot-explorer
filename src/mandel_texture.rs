@@ -46,6 +46,8 @@ pub struct MandelTexture {
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
     pub fractal_rect: RectF64,
+
+    fractal_scale: f64,
 }
 
 
@@ -55,7 +57,7 @@ impl MandelTexture {
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 4
+            1024 * 6
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -114,6 +116,7 @@ impl MandelTexture {
             tiles,
 
             fractal_rect: RectF64::zeroed(),
+            fractal_scale: 1.0,
         }
     }
 
@@ -125,14 +128,12 @@ impl MandelTexture {
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
-        let a = self.tex_size.x as f64 / self.window_size.x as f64;
-        let b = self.fractal_rect.size.x / frame_rect.size.x;
-        let scale_changed =
-            (a - b).abs() > f64::EPSILON;
+        let scale_changed = frame_rect.size.y != self.fractal_scale;
         if scale_changed {
+            self.fractal_scale = frame_rect.size.y;
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
-                Vec2f64::all(a * frame_rect.size.x),
+                Vec2f64::all(frame_rect.size.x * self.tex_size.x as f64 / self.window_size.x as f64),
             );
             // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
