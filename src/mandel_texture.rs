@@ -7,12 +7,13 @@ use anyhow::anyhow;
 use bytemuck::Zeroable;
 use num_complex::Complex;
 use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
 
-const TILE_SIZE: u32 = 16;
+const TILE_SIZE: u32 = 64;
 
 pub enum TileState {
     Idle,
@@ -39,6 +40,7 @@ pub struct MandelTexture {
     window_size: Vec2u32,
 
     runtime: Runtime,
+    semaphore: Arc<Semaphore>,
 
     pub tex_size: Vec2u32,
     pub max_iter: u32,
@@ -53,7 +55,7 @@ impl MandelTexture {
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 2
+            1024 * 4
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -95,7 +97,8 @@ impl MandelTexture {
         }
 
         let runtime = Runtime::new().unwrap();
-
+        let cpu_core_count = num_cpus::get_physical();
+        let semaphore = Arc::new(Semaphore::new(cpu_core_count * 2));
 
         Self {
             texture1,
@@ -104,6 +107,7 @@ impl MandelTexture {
             window_size,
 
             runtime,
+            semaphore,
 
             tex_size: Vec2u32::all(tex_size),
             max_iter: 100,
@@ -191,14 +195,18 @@ impl MandelTexture {
                 let callback = tile_ready_callback.clone();
                 let cancel_token = tile.cancel_token.clone();
                 let tile_state_clone = tile.state.clone();
+                let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
+                let semaphore = self.semaphore.clone();
 
                 let task_handle = self.runtime.spawn(async move {
+                    let _ = semaphore.acquire().await.unwrap();
                     let buf = mandelbrot(
                         img_size,
                         tile_rect,
                         -fractal_rect.center(),
                         1.0 / fractal_rect.size.y,
                         cancel_token,
+                        cancel_token_value,
                     )
                         .await
                         .ok();
@@ -295,10 +303,9 @@ async fn mandelbrot(
     fractal_offset: Vec2f64,
     fractal_scale: f64,
     cancel_token: Arc<AtomicU32>,
+    cancel_token_value: u32,
 ) -> anyhow::Result<Vec<u8>>
 {
-    let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
-
     let now = Instant::now();
 
     let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];

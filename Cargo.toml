@@ -12,6 +12,8 @@ wgpu = "*"
 pollster = "*"
 tokio = { version = "*", features = ["full"] }
 anyhow = "*"
+num_cpus = "*"
+
 
 [profile.release]
 opt-level = 3         # Apply the highest level of optimizations.
