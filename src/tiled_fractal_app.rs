@@ -79,9 +79,9 @@ impl App for TiledFractalApp {
         };
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
-        let frame_rect = RectF64::new(
-            -aspect / 2.0,
-            aspect,
+        let frame_rect = RectF64::center_size(
+            Vec2f64::zeroed(),
+            aspect * 2.5,
         );
 
         Self {
@@ -158,13 +158,12 @@ impl App for TiledFractalApp {
         }
 
         let offset =
-         2.0*   (self.mandel_texture.fractal_rect.pos - self.frame_rect.pos)
-                // / self.mandel_texture.fractal_rect.size
-            // -2.0 * self.frame_rect.center() / self.aspect
-            // / (self.mandel_texture.fractal_rect.size)
-            // Vec2f64::zeroed()
+            // (self.mandel_texture.fractal_rect.center() - self.frame_rect.center())
+            // / self.frame_rect.size
+            Vec2f64::new(0.0, 0.0)
+            // * self.mandel_texture.fractal_rect.size / (self.frame_rect.size)
             ;
-
+        // println!("offset: {:?}", offset);
 
         self.renderer.go(
             &render_info,
@@ -202,15 +201,18 @@ impl TiledFractalApp {
 
         let old_offset = self.frame_rect.pos;
         let new_offset =
-            // old_offset
-            //     - mouse_delta * self.frame_rect.size;
             old_offset
-                - mouse_delta * new_scale
-                + mouse_pos * old_offset * (new_scale - old_scale);
+                + mouse_delta * self.frame_rect.size
+            // * new_scale
+            // + mouse_pos * old_offset * (new_scale - old_scale)
+            ;
 
         self.frame_rect.pos = new_offset;
 
         self.update_fractal();
+
+        // println!("frame_rect: {:?}", self.frame_rect);
+        // println!("fractal_rect: {:?}", self.mandel_texture.fractal_rect);
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
@@ -226,9 +228,9 @@ impl TiledFractalApp {
     fn update_fractal(&mut self) {
         // println!("frame_rect: {:?}", self.frame_rect);
 
-        let frame_rect = RectF64::new(
-            self.frame_rect.pos + 0.1 * self.frame_rect.size,
-            0.8 * self.frame_rect.size,
+        let frame_rect = RectF64::pos_size(
+            self.frame_rect.pos,
+            self.frame_rect.size,
         );
 
         let event_loop_proxy =

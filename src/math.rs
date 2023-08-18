@@ -623,9 +623,15 @@ impl From<RectU32> for RectI32 {
 
 
 impl RectF64 {
-    pub fn new(pos: Vec2f64, size: Vec2f64) -> Self {
+    pub fn pos_size(pos: Vec2f64, size: Vec2f64) -> Self {
         Self {
             pos,
+            size,
+        }
+    }
+    pub fn center_size(center: Vec2f64, size: Vec2f64) -> Self {
+        Self {
+            pos: center - size / 2.0,
             size,
         }
     }
