@@ -8,5 +8,5 @@ Draft drag and zoom done on GPU.
 
 Written on Rust. Uses winit, wgpu, rayon and tokio.
 Runs pretty smooth on my Macbook Air M2 2022.
- 
-![Screenshot 2023-07-27 at 11.38.29 PM.png](doc%2FScreenshot%202023-07-27%20at%2011.38.29%20PM.png)
+
+![Screen Recording 2023-08-18 at 5.35.27 PM.webm](doc%2FScreen%20Recording%202023-08-18%20at%205.35.27%20PM.webm)

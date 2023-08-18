@@ -1,7 +1,7 @@
 use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
-use std::time::{Duration, Instant};
+use std::time::{ Instant};
 
 use anyhow::anyhow;
 use bytemuck::Zeroable;
@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
 
-const TILE_SIZE: u32 = 64;
+const TILE_SIZE: u32 = 128;
 
 pub enum TileState {
     Idle,
@@ -347,11 +347,12 @@ async fn mandelbrot(
 
     if false {
         let elapsed = now.elapsed();
-        let target = Duration::from_millis(100);
-        if elapsed < target {
-            // tokio::time::sleep(target - elapsed).await;
-            // thread::sleep(target - elapsed);
-        }
+        //println!("Elapsed: {}ms", elapsed.as_millis());
+        // let target = Duration::from_millis(100);
+        // if elapsed < target {
+        //     tokio::time::sleep(target - elapsed).await;
+        //     thread::sleep(target - elapsed);
+        // }
     }
 
     Ok(buffer)
