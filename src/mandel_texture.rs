@@ -53,7 +53,7 @@ impl MandelTexture {
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 4
+            1024 * 2
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -131,16 +131,18 @@ impl MandelTexture {
         //     a_dist.partial_cmp(&b_dist).unwrap()
         // });
 
-        let a = Vec2f64::from(self.tex_size) / Vec2f64::from(self.window_size);
-        let b = self.fractal_rect.size / frame_rect.size;
-        let c = (a.length_squared() - b.length_squared()).abs() > 0.0001;
-        if c {
+        let a = self.tex_size.x as f64 / self.window_size.x as f64;
+        let b = self.fractal_rect.size.x / frame_rect.size.x;
+        let scale_changed =
+            (a - b).abs() > f64::EPSILON
+            ;
+        if scale_changed {
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
-                a * frame_rect.size,
+                Vec2f64::all(a * frame_rect.size.x),
             );
-            println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
-            println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
+            // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
+            // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
         }
 
 
@@ -152,7 +154,7 @@ impl MandelTexture {
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-                if c {
+                if scale_changed {
                     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let TileState::Computing { task_handle } = tile_state {
                         task_handle.abort();
@@ -202,7 +204,6 @@ impl MandelTexture {
                             buffer: buf,
                         };
                         (callback)(tile_index);
-                        // println!("Tile {} with pos {:?} ready", tile_index, tile_rect.pos);
                     } else {
                         *tile_state = TileState::Idle;
                     }

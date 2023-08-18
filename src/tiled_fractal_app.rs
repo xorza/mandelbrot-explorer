@@ -159,10 +159,7 @@ impl App for TiledFractalApp {
 
         let offset =
             2.0 * (self.mandel_texture.fractal_rect.center() - self.frame_rect.center())
-                // / self.mandel_texture.fractal_rect.size
                 / self.frame_rect.size
-            // Vec2f64::new(0.0, 0.0)
-            // * self.mandel_texture.fractal_rect.size / (self.frame_rect.size)
             ;
         // println!("offset: {:?}", offset);
 
@@ -198,12 +195,11 @@ impl TiledFractalApp {
         let old_size = self.frame_rect.size;
         let new_size = old_size * zoom;
 
-
         let old_offset = self.frame_rect.center();
         let new_offset =
             old_offset
                 - mouse_delta * new_size
-                + mouse_pos * (new_size - old_size);
+                - mouse_pos * (new_size - old_size);
 
         self.frame_rect = RectF64::center_size(
             new_offset,
