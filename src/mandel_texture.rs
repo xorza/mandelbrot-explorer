@@ -53,7 +53,7 @@ impl MandelTexture {
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 3
+            1024 * 4
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -134,7 +134,7 @@ impl MandelTexture {
         let a = Vec2f64::from(self.tex_size) / Vec2f64::from(self.window_size);
         let b = self.fractal_rect.size / frame_rect.size;
         let c = (a.length_squared() - b.length_squared()).abs() > 0.0001;
-        if true {
+        if c {
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
                 a * frame_rect.size,
@@ -152,13 +152,13 @@ impl MandelTexture {
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-                // if c {
-                tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if let TileState::Computing { task_handle } = tile_state {
-                    task_handle.abort();
+                if c {
+                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if let TileState::Computing { task_handle } = tile_state {
+                        task_handle.abort();
+                    }
+                    *tile_state = TileState::Idle;
                 }
-                *tile_state = TileState::Idle;
-                // }
 
                 let tile_rect = tile.fractal_rect(
                     self.tex_size,
@@ -189,7 +189,7 @@ impl MandelTexture {
                     let buf = mandelbrot(
                         img_size,
                         tile_rect,
-                        fractal_rect.center(),
+                        -fractal_rect.center(),
                         1.0 / fractal_rect.size.y,
                         cancel_token,
                     )
