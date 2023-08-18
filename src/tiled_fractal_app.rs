@@ -187,27 +187,28 @@ impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
         let mouse_pos = Vec2i32::new(mouse_pos.x as i32, self.window_size.y as i32 - mouse_pos.y as i32);
         let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
-        // let mouse_pos = mouse_pos - 0.5f64;
+        let mouse_pos = mouse_pos - 0.5f64;
 
         let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
         let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
-        let old_scale = self.frame_rect.size.y;
-        let new_scale = old_scale * zoom;
-        self.frame_rect.size = new_scale * self.aspect;
+        let old_size = self.frame_rect.size;
+        let new_size = old_size * zoom;
 
 
-        let old_offset = self.frame_rect.pos;
+        let old_offset = self.frame_rect.center();
         let new_offset =
             old_offset
-                + mouse_delta * self.frame_rect.size
-            // * new_scale
-            // + mouse_pos * old_offset * (new_scale - old_scale)
+                + mouse_delta * new_size
+                + mouse_pos * (new_size - old_size)
             ;
 
-        self.frame_rect.pos = new_offset;
+        self.frame_rect = RectF64::center_size(
+            new_offset,
+            new_size,
+        );
 
         self.update_fractal();
 
