@@ -701,8 +701,6 @@ async fn mandelbrot(
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
     let scale = fractal_scale;
 
-    let mut max_color = 0.0f64;
-
     for y in 0..tile_rect.size.y {
         for x in 0..tile_rect.size.x {
             if x % 32 == 0 {
@@ -751,7 +749,6 @@ async fn mandelbrot(
         // }
     }
 
-    // println!("max_color: {}", max_color);
 
     Ok(buffer)
 }
