@@ -10,7 +10,6 @@ use num_complex::Complex;
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
-use wgpu::CommandEncoder;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
@@ -39,12 +38,12 @@ pub struct Tile {
 
 pub struct MandelTexture {
     pub texture1: wgpu::Texture,
-    pub texture_view1: wgpu::TextureView,
+    pub texture1_view: wgpu::TextureView,
     pub bind_group1: wgpu::BindGroup,
     blit_pipeline: wgpu::RenderPipeline,
 
     pub texture2: wgpu::Texture,
-    pub texture_view2: wgpu::TextureView,
+    pub texture2_view: wgpu::TextureView,
     pub bind_group2: wgpu::BindGroup,
 
     window_size: Vec2u32,
@@ -93,7 +92,7 @@ impl MandelTexture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
             label: None,
         });
@@ -105,7 +104,7 @@ impl MandelTexture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
             label: None,
         });
@@ -245,7 +244,7 @@ impl MandelTexture {
                 module: &blit_shader,
                 entry_point: "fs_main",
                 targets: &[
-                    Some(surface_config.view_formats[0].into()),
+                    Some(wgpu::TextureFormat::R8Unorm.into()),
                 ],
             }),
             primitive: wgpu::PrimitiveState {
@@ -264,7 +263,6 @@ impl MandelTexture {
             label: None,
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("screen_shader.wgsl"))),
         });
-
         let screen_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),
@@ -294,14 +292,14 @@ impl MandelTexture {
 
         Self {
             texture1,
-            texture_view1,
+            texture1_view: texture_view1,
             bind_group1,
 
             texture2,
-            texture_view2,
+            texture2_view: texture_view2,
             bind_group2,
 
-            blit_pipeline ,
+            blit_pipeline,
             window_size,
 
             runtime,
@@ -438,20 +436,18 @@ impl MandelTexture {
     }
 
     pub fn render(&mut self, render_info: &RenderInfo) {
-        let mut command_encoder = render_info.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        self.blit_textures(render_info, &mut command_encoder);
+        self.blit_textures(render_info);
         self.upload_tiles(render_info);
-        self.surface_render(render_info,  &mut command_encoder);
-
-        render_info.queue.submit(Some(command_encoder.finish()));
+        self.surface_render(render_info);
     }
 
-    fn blit_textures(&mut self, render_info: &RenderInfo,  command_encoder: &mut CommandEncoder) {
+    fn blit_textures(&mut self, render_info: &RenderInfo) {
         if !self.frame_changed {
             return;
         }
+
+        let mut command_encoder = render_info.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
             let mut render_pass = command_encoder
@@ -460,7 +456,7 @@ impl MandelTexture {
                         label: None,
                         color_attachments: &[
                             Some(wgpu::RenderPassColorAttachment {
-                                view: render_info.view,
+                                view: &self.texture2_view,
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -472,7 +468,7 @@ impl MandelTexture {
                     }
                 );
 
-            render_pass.set_pipeline(&self.screen_pipeline);
+            render_pass.set_pipeline(&self.blit_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
             let mut pc = PushConst::new();
@@ -487,12 +483,14 @@ impl MandelTexture {
                 pc.as_bytes(),
             );
 
-            render_pass.set_bind_group(0, &self.bind_group2, &[]);
+            render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 
+        render_info.queue.submit(Some(command_encoder.finish()));
+
         swap(&mut self.texture1, &mut self.texture2);
-        swap(&mut self.texture_view1, &mut self.texture_view2);
+        swap(&mut self.texture1_view, &mut self.texture2_view);
         swap(&mut self.bind_group1, &mut self.bind_group2);
 
         self.frame_changed = false;
@@ -546,7 +544,7 @@ impl MandelTexture {
             });
     }
 
-    fn surface_render(&self, render_info: &RenderInfo, command_encoder: &mut CommandEncoder) {
+    fn surface_render(&self, render_info: &RenderInfo) {
         let tex_size = Vec2f32::from(self.texture_size);
         let win_size = Vec2f32::from(self.window_size);
         let scale = tex_size / win_size;
@@ -554,40 +552,46 @@ impl MandelTexture {
             2.0 * (self.fractal_rect.center() - self.frame_rect.center())
                 / self.frame_rect.size;
 
-        let mut render_pass = command_encoder
-            .begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: render_info.view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: None,
-                }
+        let mut command_encoder = render_info.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut render_pass = command_encoder
+                .begin_render_pass(
+                    &wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: render_info.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: true,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: None,
+                    }
+                );
+
+            render_pass.set_pipeline(&self.screen_pipeline);
+            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+
+            let mut pc = PushConst::new();
+            pc.proj_mat
+                .translate2d(Vec2f32::from(offset))
+                .scale(scale);
+
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                pc.as_bytes(),
             );
 
-        render_pass.set_pipeline(&self.screen_pipeline);
-        render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+            render_pass.set_bind_group(0, &self.bind_group1, &[]);
+            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+        }
 
-        let mut pc = PushConst::new();
-        pc.proj_mat
-            .translate2d(Vec2f32::from(offset))
-            .scale(scale);
-
-        render_pass.set_push_constants(
-            wgpu::ShaderStages::VERTEX,
-            0,
-            pc.as_bytes(),
-        );
-
-        render_pass.set_bind_group(0, &self.bind_group1, &[]);
-        render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+        render_info.queue.submit(Some(command_encoder.finish()));
     }
 
     pub fn resize_window(&mut self, window_size: Vec2u32) {

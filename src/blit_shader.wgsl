@@ -31,8 +31,7 @@ var the_sampler: sampler;
 var color: texture_2d<f32>;
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_main(vertex: VertexOutput) -> @location(0) f32 {
     let r = textureSample(color, the_sampler, vertex.tex_coord).r;
-    let clrf = vec4<f32>(r, r, r, 1.0);
-    return clrf;
+    return r;
 }
