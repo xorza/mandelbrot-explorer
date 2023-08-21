@@ -13,6 +13,7 @@ pollster = "*"
 tokio = { version = "*", features = ["full"] }
 anyhow = "*"
 num_cpus = "*"
+image = "*"
 
 
 [profile.release]

@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::mem::swap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
@@ -71,6 +72,7 @@ pub struct MandelTexture {
 impl MandelTexture {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
         window_size: Vec2u32,
     ) -> Self {
@@ -164,6 +166,43 @@ impl MandelTexture {
             ..Default::default()
         });
 
+        let palette_texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D1,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+            label: None,
+        });
+        let palette_view = palette_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let img = image::open("palette.png").unwrap();
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &palette_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &img.as_bytes(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(256*4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 256,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
         let bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -180,6 +219,16 @@ impl MandelTexture {
                             multisampled: false,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D1,
                         },
                         count: None,
                     },
@@ -209,6 +258,10 @@ impl MandelTexture {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&texture_view1),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&palette_view),
+                },
             ],
             label: None,
         });
@@ -223,10 +276,13 @@ impl MandelTexture {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(&texture_view2),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&palette_view),
+                },
             ],
             label: None,
         });
-
 
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,

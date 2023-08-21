@@ -29,10 +29,16 @@ var the_sampler: sampler;
 @group(0)
 @binding(1)
 var color: texture_2d<f32>;
+@group(0)
+@binding(2)
+var palette: texture_1d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let r = textureSample(color, the_sampler, vertex.tex_coord).r;
-    let clrf = vec4<f32>(r, r, r, 1.0);
-    return clrf;
+    let rgb = textureSample(palette, the_sampler, r).rgb;
+    return vec4<f32>(rgb, 1.0);
+
+//    let clrf = vec4<f32>(sqrt(r), r, r*r, 1.0);
+//    return clrf;
 }

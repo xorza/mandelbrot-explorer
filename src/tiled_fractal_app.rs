@@ -43,15 +43,14 @@ impl App for TiledFractalApp {
 
     fn new(
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
         event_loop_proxy: EventLoopProxy<UserEvent>,
     ) -> TiledFractalApp
     {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
 
-        let mandel_texture = MandelTexture::new(device, surface_config, window_size);
-
+        let mandel_texture = MandelTexture::new(device, queue, surface_config, window_size);
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
         let frame_rect = RectF64::center_size(
