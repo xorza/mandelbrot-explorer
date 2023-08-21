@@ -471,10 +471,15 @@ impl MandelTexture {
             render_pass.set_pipeline(&self.blit_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
+            let offset = (self.fractal_rect_prev.center() - self.fractal_rect.center())
+                / self.fractal_rect.size;
+            let offset = Vec2f64::new(offset.x, offset.y);
+            let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
+            println!("offset: {:?}, scale: {:?}", offset, scale);
             let mut pc = PushConst::new();
             pc.proj_mat
-            // .translate2d(Vec2f32::from(offset))
-            // .scale(scale)
+                .translate2d(Vec2f32::from(offset))
+                .scale(Vec2f32::from(scale))
             ;
 
             render_pass.set_push_constants(
