@@ -15,7 +15,7 @@ use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
 use crate::wgpu_renderer::{ WgpuRenderer};
 
-const TILE_SIZE: u32 = 128;
+const TILE_SIZE: u32 = 64;
 
 pub enum TileState {
     Idle,
@@ -68,7 +68,7 @@ impl MandelTexture {
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 3
+            1024 * 8
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -78,6 +78,7 @@ impl MandelTexture {
             height: tex_size,
             depth_or_array_layers: 1,
         };
+
         let texture1 = device.create_texture(&wgpu::TextureDescriptor {
             size: texture_extent,
             mip_level_count: 1,
@@ -292,50 +293,7 @@ impl MandelTexture {
     }
 
     pub fn render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer){
-        self.tiles
-            .iter()
-            .for_each(|tile| {
-                let mut buff: Option<Vec<u8>> = None;
-
-                {
-                    let mut tile_state = tile.state.lock().unwrap();
-                    if let TileState::WaitForUpload { buffer } = &mut *tile_state {
-                        let mut new_buff: Vec<u8> = Vec::new();
-                        swap(&mut new_buff, buffer);
-                        buff = Some(new_buff);
-                    }
-                    if buff.is_some() {
-                        *tile_state = TileState::Ready;
-                    } else {
-                        return;
-                    }
-                }
-
-                let buff = buff.unwrap();
-                render_info.queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &self.texture1,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d {
-                            x: tile.tex_rect.pos.x,
-                            y: tile.tex_rect.pos.y,
-                            z: 0,
-                        },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &buff,
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(tile.tex_rect.size.x),
-                        rows_per_image: Some(tile.tex_rect.size.y),
-                    },
-                    wgpu::Extent3d {
-                        width: tile.tex_rect.size.x,
-                        height: tile.tex_rect.size.y,
-                        depth_or_array_layers: 1,
-                    },
-                );
-            });
+        self.upload_tiles(render_info);
 
         let tex_size = Vec2f32::from(self.texture_size);
         let win_size = Vec2f32::from(self.window_size);
@@ -386,6 +344,53 @@ impl MandelTexture {
         }
 
         render_info.queue.submit(Some(command_encoder.finish()));
+    }
+
+    fn upload_tiles(&self, render_info: &RenderInfo) {
+        self.tiles
+            .iter()
+            .for_each(|tile| {
+                let mut buff: Option<Vec<u8>> = None;
+
+                {
+                    let mut tile_state = tile.state.lock().unwrap();
+                    if let TileState::WaitForUpload { buffer } = &mut *tile_state {
+                        let mut new_buff: Vec<u8> = Vec::new();
+                        swap(&mut new_buff, buffer);
+                        buff = Some(new_buff);
+                    }
+                    if buff.is_some() {
+                        *tile_state = TileState::Ready;
+                    } else {
+                        return;
+                    }
+                }
+
+                let buff = buff.unwrap();
+                render_info.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &self.texture1,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: tile.tex_rect.pos.x,
+                            y: tile.tex_rect.pos.y,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &buff,
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(tile.tex_rect.size.x),
+                        rows_per_image: Some(tile.tex_rect.size.y),
+                    },
+                    wgpu::Extent3d {
+                        width: tile.tex_rect.size.x,
+                        height: tile.tex_rect.size.y,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            });
     }
 
     pub fn resize_window(&mut self, window_size: Vec2u32) {

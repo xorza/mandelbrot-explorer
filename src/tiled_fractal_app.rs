@@ -10,7 +10,7 @@ use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::{RectF64, Vec2f64, Vec2i32, Vec2u32};
-use crate::wgpu_renderer::{ WgpuRenderer};
+use crate::wgpu_renderer::WgpuRenderer;
 
 enum ManipulateState {
     Idle,
@@ -129,15 +129,7 @@ impl App for TiledFractalApp {
     }
 
     fn render(&mut self, render_info: &RenderInfo) {
-
-
-        self.mandel_texture.render(render_info,&self.renderer );
-
-        // self.renderer.go(
-        //     &render_info,
-        //     &self.screen_tex_bind_group,
-        //     offset,
-        // );
+        self.mandel_texture.render(render_info, &self.renderer);
     }
 
     fn resize(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, window_size: Vec2u32) {
