@@ -10,7 +10,6 @@ use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::{RectF64, Vec2f64, Vec2i32, Vec2u32};
-use crate::wgpu_renderer::WgpuRenderer;
 
 enum ManipulateState {
     Idle,
@@ -18,8 +17,6 @@ enum ManipulateState {
 }
 
 pub struct TiledFractalApp {
-    renderer: WgpuRenderer,
-
     window_size: Vec2u32,
     event_loop: EventLoopProxy<UserEvent>,
     runtime: Runtime,
@@ -46,15 +43,14 @@ impl App for TiledFractalApp {
 
     fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
         event_loop_proxy: EventLoopProxy<UserEvent>,
     ) -> TiledFractalApp
     {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
-        let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let mandel_texture = MandelTexture::new(device, &renderer, window_size);
+        let mandel_texture = MandelTexture::new(device, surface_config, window_size);
 
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
@@ -64,8 +60,6 @@ impl App for TiledFractalApp {
         );
 
         Self {
-            renderer,
-
             window_size,
             event_loop: event_loop_proxy,
             runtime: Runtime::new().unwrap(),
@@ -129,7 +123,7 @@ impl App for TiledFractalApp {
     }
 
     fn render(&mut self, render_info: &RenderInfo) {
-        self.mandel_texture.render(render_info, &self.renderer);
+        self.mandel_texture.render(render_info);
     }
 
     fn resize(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, window_size: Vec2u32) {

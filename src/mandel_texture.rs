@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
@@ -10,11 +11,11 @@ use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::CommandEncoder;
+use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
-use crate::wgpu_renderer::WgpuRenderer;
 
 const TILE_SIZE: u32 = 64;
 
@@ -40,6 +41,7 @@ pub struct MandelTexture {
     pub texture1: wgpu::Texture,
     pub texture_view1: wgpu::TextureView,
     pub bind_group1: wgpu::BindGroup,
+    blit_pipeline: wgpu::RenderPipeline,
 
     pub texture2: wgpu::Texture,
     pub texture_view2: wgpu::TextureView,
@@ -55,16 +57,22 @@ pub struct MandelTexture {
     pub tiles: Vec<Tile>,
 
     frame_rect: RectF64,
-    pub fractal_rect: RectF64,
-    pub fractal_rect_prev: RectF64,
+    fractal_rect: RectF64,
+    fractal_rect_prev: RectF64,
     fractal_scale: f64,
+    frame_changed: bool,
+
+    pub screen_rect_buf: wgpu::Buffer,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub screen_pipeline: wgpu::RenderPipeline,
+    pub sampler: wgpu::Sampler,
 }
 
 
 impl MandelTexture {
     pub fn new(
         device: &wgpu::Device,
-        renderer: &WgpuRenderer,
+        surface_config: &wgpu::SurfaceConfiguration,
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
@@ -126,12 +134,77 @@ impl MandelTexture {
         let cpu_core_count = num_cpus::get_physical();
         let semaphore = Arc::new(Semaphore::new(cpu_core_count * 2));
 
+        let vertex_buffers = [wgpu::VertexBufferLayout {
+            array_stride: ScreenRect::vert_size() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x4,
+                    offset: 4 * 4,
+                    shader_location: 1,
+                },
+            ],
+        }];
+        let screen_rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            contents: ScreenRect::default().as_bytes(),
+            usage: wgpu::BufferUsages::VERTEX,
+            label: None,
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            border_color: None,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            });
+        let pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[
+                    wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::VERTEX,
+                        range: 0..PushConst::size_in_bytes(),
+                    },
+                ],
+                label: None,
+            });
+
         let bind_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &renderer.bind_group_layout,
+            layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -141,11 +214,11 @@ impl MandelTexture {
             label: None,
         });
         let bind_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &renderer.bind_group_layout,
+            layout: &bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -153,6 +226,70 @@ impl MandelTexture {
                 },
             ],
             label: None,
+        });
+
+
+        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("blit_shader.wgsl"))),
+        });
+        let blit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &blit_shader,
+                entry_point: "vs_main",
+                buffers: &vertex_buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_shader,
+                entry_point: "fs_main",
+                targets: &[
+                    Some(surface_config.view_formats[0].into()),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                front_face: wgpu::FrontFace::Cw,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let screen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("screen_shader.wgsl"))),
+        });
+
+        let screen_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &screen_shader,
+                entry_point: "vs_main",
+                buffers: &vertex_buffers,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &screen_shader,
+                entry_point: "fs_main",
+                targets: &[
+                    Some(surface_config.view_formats[0].into()),
+                ],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                front_face: wgpu::FrontFace::Cw,
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
         });
 
         Self {
@@ -164,6 +301,7 @@ impl MandelTexture {
             texture_view2,
             bind_group2,
 
+            blit_pipeline ,
             window_size,
 
             runtime,
@@ -177,6 +315,12 @@ impl MandelTexture {
             fractal_scale: 1.0,
             fractal_rect: RectF64::zeroed(),
             fractal_rect_prev: RectF64::zeroed(),
+            frame_changed: false,
+
+            screen_rect_buf,
+            bind_group_layout,
+            screen_pipeline,
+            sampler,
         }
     }
 
@@ -193,6 +337,7 @@ impl MandelTexture {
         let off_frame = !self.fractal_rect.contains(&frame_rect);
         let frame_changed = off_frame || scale_changed;
         if frame_changed {
+            self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
             self.fractal_scale = frame_rect.size.length_squared();
             self.fractal_rect = RectF64::center_size(
@@ -292,59 +437,66 @@ impl MandelTexture {
             });
     }
 
-    pub fn render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer) {
+    pub fn render(&mut self, render_info: &RenderInfo) {
         let mut command_encoder = render_info.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+        self.blit_textures(render_info, &mut command_encoder);
         self.upload_tiles(render_info);
-        self.surface_render(render_info, &renderer, &mut command_encoder);
+        self.surface_render(render_info,  &mut command_encoder);
 
         render_info.queue.submit(Some(command_encoder.finish()));
     }
 
+    fn blit_textures(&mut self, render_info: &RenderInfo,  command_encoder: &mut CommandEncoder) {
+        if !self.frame_changed {
+            return;
+        }
 
-    fn surface_render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer, command_encoder: &mut CommandEncoder) {
-        let tex_size = Vec2f32::from(self.texture_size);
-        let win_size = Vec2f32::from(self.window_size);
-        let scale = tex_size / win_size;
-        let offset =
-            2.0 * (self.fractal_rect.center() - self.frame_rect.center())
-                / self.frame_rect.size;
+        {
+            let mut render_pass = command_encoder
+                .begin_render_pass(
+                    &wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: render_info.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: true,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: None,
+                    }
+                );
 
-        let mut render_pass = command_encoder
-            .begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: render_info.view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                store: true,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: None,
-                }
+            render_pass.set_pipeline(&self.screen_pipeline);
+            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+
+            let mut pc = PushConst::new();
+            pc.proj_mat
+            // .translate2d(Vec2f32::from(offset))
+            // .scale(scale)
+            ;
+
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                pc.as_bytes(),
             );
 
-        render_pass.set_pipeline(&renderer.pipeline);
-        render_pass.set_vertex_buffer(0, renderer.screen_rect_buf.slice(..));
+            render_pass.set_bind_group(0, &self.bind_group2, &[]);
+            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+        }
 
-        let mut pc = PushConst::new();
-        pc.proj_mat
-            .translate2d(Vec2f32::from(offset))
-            .scale(scale);
+        swap(&mut self.texture1, &mut self.texture2);
+        swap(&mut self.texture_view1, &mut self.texture_view2);
+        swap(&mut self.bind_group1, &mut self.bind_group2);
 
-        render_pass.set_push_constants(
-            wgpu::ShaderStages::VERTEX,
-            0,
-            pc.as_bytes(),
-        );
-
-        render_pass.set_bind_group(0, &self.bind_group1, &[]);
-        render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+        self.frame_changed = false;
+        self.fractal_rect_prev = self.fractal_rect;
     }
 
     fn upload_tiles(&self, render_info: &RenderInfo) {
@@ -392,6 +544,50 @@ impl MandelTexture {
                     },
                 );
             });
+    }
+
+    fn surface_render(&self, render_info: &RenderInfo, command_encoder: &mut CommandEncoder) {
+        let tex_size = Vec2f32::from(self.texture_size);
+        let win_size = Vec2f32::from(self.window_size);
+        let scale = tex_size / win_size;
+        let offset =
+            2.0 * (self.fractal_rect.center() - self.frame_rect.center())
+                / self.frame_rect.size;
+
+        let mut render_pass = command_encoder
+            .begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: render_info.view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                }
+            );
+
+        render_pass.set_pipeline(&self.screen_pipeline);
+        render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
+
+        let mut pc = PushConst::new();
+        pc.proj_mat
+            .translate2d(Vec2f32::from(offset))
+            .scale(scale);
+
+        render_pass.set_push_constants(
+            wgpu::ShaderStages::VERTEX,
+            0,
+            pc.as_bytes(),
+        );
+
+        render_pass.set_bind_group(0, &self.bind_group1, &[]);
+        render_pass.draw(0..ScreenRect::vert_count(), 0..1);
     }
 
     pub fn resize_window(&mut self, window_size: Vec2u32) {

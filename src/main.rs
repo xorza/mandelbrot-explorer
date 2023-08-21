@@ -7,7 +7,6 @@ use crate::tiled_fractal_app::TiledFractalApp;
 mod app_base;
 mod event;
 mod math;
-mod wgpu_renderer;
 mod render_pods;
 mod mandel_texture;
 mod tiled_fractal_app;
