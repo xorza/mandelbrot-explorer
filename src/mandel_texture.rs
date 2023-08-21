@@ -9,11 +9,12 @@ use num_complex::Complex;
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
+use wgpu::CommandEncoder;
 
 use crate::app_base::RenderInfo;
 use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
-use crate::wgpu_renderer::{ WgpuRenderer};
+use crate::wgpu_renderer::WgpuRenderer;
 
 const TILE_SIZE: u32 = 64;
 
@@ -53,8 +54,7 @@ pub struct MandelTexture {
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
 
-
-     frame_rect: RectF64,
+    frame_rect: RectF64,
     pub fractal_rect: RectF64,
     pub fractal_rect_prev: RectF64,
     fractal_scale: f64,
@@ -292,9 +292,18 @@ impl MandelTexture {
             });
     }
 
-    pub fn render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer){
-        self.upload_tiles(render_info);
+    pub fn render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer) {
+        let mut command_encoder = render_info.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
+        self.upload_tiles(render_info);
+        self.surface_render(render_info, &renderer, &mut command_encoder);
+
+        render_info.queue.submit(Some(command_encoder.finish()));
+    }
+
+
+    fn surface_render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer, command_encoder: &mut CommandEncoder) {
         let tex_size = Vec2f32::from(self.texture_size);
         let win_size = Vec2f32::from(self.window_size);
         let scale = tex_size / win_size;
@@ -302,48 +311,40 @@ impl MandelTexture {
             2.0 * (self.fractal_rect.center() - self.frame_rect.center())
                 / self.frame_rect.size;
 
-        let mut command_encoder = render_info.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        {
-            let mut render_pass = command_encoder
-                .begin_render_pass(
-                    &wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: render_info.view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            }),
-                        ],
-                        depth_stencil_attachment: None,
-                    }
-                );
-
-            render_pass.set_pipeline(&renderer.pipeline);
-            render_pass.set_vertex_buffer(0, renderer.screen_rect_buf.slice(..));
-
-
-            let mut pc = PushConst::new();
-            pc.proj_mat
-                .translate2d(Vec2f32::from(offset))
-                .scale(scale);
-
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                pc.as_bytes(),
+        let mut render_pass = command_encoder
+            .begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: render_info.view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                }
             );
 
-            render_pass.set_bind_group(0, &self.bind_group1, &[]);
-            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
-        }
+        render_pass.set_pipeline(&renderer.pipeline);
+        render_pass.set_vertex_buffer(0, renderer.screen_rect_buf.slice(..));
 
-        render_info.queue.submit(Some(command_encoder.finish()));
+        let mut pc = PushConst::new();
+        pc.proj_mat
+            .translate2d(Vec2f32::from(offset))
+            .scale(scale);
+
+        render_pass.set_push_constants(
+            wgpu::ShaderStages::VERTEX,
+            0,
+            pc.as_bytes(),
+        );
+
+        render_pass.set_bind_group(0, &self.bind_group1, &[]);
+        render_pass.draw(0..ScreenRect::vert_count(), 0..1);
     }
 
     fn upload_tiles(&self, render_info: &RenderInfo) {
