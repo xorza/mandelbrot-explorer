@@ -4,8 +4,12 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use num_complex::Complex;
+use crate::env::is_test_build;
 
 use crate::math::{RectU32, Vec2f64};
+
+const MULTISAMPLE: bool = true;
+const MULTISAMPLE_THRESHOLD: u16 = 32;
 
 //noinspection RsConstantConditionIf
 pub async fn mandelbrot(
@@ -50,7 +54,7 @@ pub async fn mandelbrot(
         (y * tile_rect.size.x + x) as usize
     };
 
-    const MULTISAMPLE: bool = true;
+    let mut additional_samples = 0;
 
     for y in 0..tile_rect.size.y {
         for x in 0..tile_rect.size.x {
@@ -75,7 +79,7 @@ pub async fn mandelbrot(
                     let x_prev_index = pixel_index(x - 1, y);
                     let x_prev_color0 = buffer[x_prev_index] as u16;
 
-                    if result0.abs_diff(x_prev_color0) > 128 {
+                    if result0.abs_diff(x_prev_color0) > MULTISAMPLE_THRESHOLD {
                         if samples[x_prev_index] == 1 {
                             let x_prev_pixel_pos = pixel_position(x - 1, y);
                             let x_prev_color1 = pixel(max_iterations, x_prev_pixel_pos + sample_offsets[1]);
@@ -83,6 +87,8 @@ pub async fn mandelbrot(
                             let x_prev_color3 = pixel(max_iterations, x_prev_pixel_pos + sample_offsets[3]);
                             buffer[x_prev_index] = ((x_prev_color0 + x_prev_color1 + x_prev_color2 + x_prev_color3) / 4) as u8;
                             samples[x_prev_index] = 4;
+
+                            additional_samples += 1;
                         }
                         should_multisample = true;
                     }
@@ -91,7 +97,7 @@ pub async fn mandelbrot(
                     let y_prev_index = pixel_index(x, y - 1);
                     let y_prev_color0 = buffer[y_prev_index] as u16;
 
-                    if result0.abs_diff(y_prev_color0) > 128 {
+                    if result0.abs_diff(y_prev_color0) > MULTISAMPLE_THRESHOLD {
                         if samples[y_prev_index] == 1 {
                             let y_prev_pixel_pos = pixel_position(x, y - 1);
                             let y_prev_color1 = pixel(max_iterations, y_prev_pixel_pos + sample_offsets[1]);
@@ -99,6 +105,8 @@ pub async fn mandelbrot(
                             let y_prev_color3 = pixel(max_iterations, y_prev_pixel_pos + sample_offsets[3]);
                             buffer[y_prev_index] = ((y_prev_color0 + y_prev_color1 + y_prev_color2 + y_prev_color3) / 4) as u8;
                             samples[y_prev_index] = 4;
+
+                            additional_samples += 1;
                         }
                         should_multisample = true;
                     }
@@ -111,6 +119,8 @@ pub async fn mandelbrot(
 
                     result0 = (result0 + result1 + result2 + result3) / 4;
                     samples[index] = 4;
+
+                    additional_samples += 1;
                 }
             }
 
@@ -118,9 +128,13 @@ pub async fn mandelbrot(
         }
     }
 
-    if false {
+    if is_test_build() {
         let elapsed = now.elapsed();
         println!("Elapsed: {}ms", elapsed.as_millis());
+
+        println!("Additional samples: {}", additional_samples);
+        println!("Total samples: {}", tile_rect.size.x * tile_rect.size.y);
+
         // let target = Duration::from_millis(100);
         // if elapsed < target {
         //     tokio::time::sleep(target - elapsed).await;
@@ -171,6 +185,7 @@ fn is_in_main_circle(xy: Vec2f64) -> bool {
 mod test {
     use pollster::FutureExt;
 
+    use crate::env::is_debug_build;
     use crate::math::Vec2u32;
 
     #[test]
@@ -191,22 +206,39 @@ mod test {
         let cancel_token = Arc::new(AtomicU32::new(0));
         let cancel_token_value = 0;
 
+        {
+            let cancel_token = cancel_token.clone();
+            crate::mandelbrot::mandelbrot(
+                image_size,
+                tile_rect,
+                fractal_offset,
+                fractal_scale,
+                max_iterations,
+                cancel_token,
+                cancel_token_value,
+            )
+                .block_on()
+                .unwrap();
+        }
+
         let now = std::time::Instant::now();
 
         let buffer = {
-            for _i in 0..9 {
-                let cancel_token = cancel_token.clone();
-                crate::mandelbrot::mandelbrot(
-                    image_size,
-                    tile_rect,
-                    fractal_offset,
-                    fractal_scale,
-                    max_iterations,
-                    cancel_token,
-                    cancel_token_value,
-                )
-                    .block_on()
-                    .unwrap();
+            if !is_debug_build() {
+                for _i in 0..4 {
+                    let cancel_token = cancel_token.clone();
+                    crate::mandelbrot::mandelbrot(
+                        image_size,
+                        tile_rect,
+                        fractal_offset,
+                        fractal_scale,
+                        max_iterations,
+                        cancel_token,
+                        cancel_token_value,
+                    )
+                        .block_on()
+                        .unwrap();
+                }
             }
 
             crate::mandelbrot::mandelbrot(
@@ -222,9 +254,12 @@ mod test {
                 .unwrap()
         };
 
-        let elapsed = now.elapsed().as_millis() / 10;
-        println!("Elapsed: {}ms", elapsed);
-
+        let elapsed = now.elapsed().as_millis() / 5;
+        if is_debug_build() {
+            println!("DEBUG Avg elapsed: {}ms", elapsed);
+        } else {
+            println!("Avg elapsed: {}ms", elapsed);
+        }
 
         let mut image = image::ImageBuffer::new(image_size, image_size);
         for y in 0..image_size {
