@@ -641,6 +641,12 @@ impl RectF64 {
             && self.pos.y < other.pos.y + other.size.y
             && self.pos.y + self.size.y > other.pos.y
     }
+    pub fn contains(&self, other: &Self) -> bool {
+        self.pos.x <= other.pos.x
+            && self.pos.x + self.size.x >= other.pos.x + other.size.x
+            && self.pos.y <= other.pos.y
+            && self.pos.y + self.size.y >= other.pos.y + other.size.y
+    }
     pub fn center(&self) -> Vec2f64 {
         self.pos + self.size / 2.0
     }

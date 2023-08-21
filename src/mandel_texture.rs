@@ -1,7 +1,7 @@
 use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
-use std::time::{ Instant};
+use std::time::Instant;
 
 use anyhow::anyhow;
 use bytemuck::Zeroable;
@@ -11,7 +11,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::app_base::RenderInfo;
-use crate::math::{RectF64, RectU32, Vec2f64, Vec2u32};
+use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
+use crate::render_pods::{PushConst, ScreenRect};
+use crate::wgpu_renderer::{ WgpuRenderer};
 
 const TILE_SIZE: u32 = 128;
 
@@ -36,17 +38,25 @@ pub struct Tile {
 pub struct MandelTexture {
     pub texture1: wgpu::Texture,
     pub texture_view1: wgpu::TextureView,
+    pub bind_group1: wgpu::BindGroup,
+
+    pub texture2: wgpu::Texture,
+    pub texture_view2: wgpu::TextureView,
+    pub bind_group2: wgpu::BindGroup,
 
     window_size: Vec2u32,
 
     runtime: Runtime,
     semaphore: Arc<Semaphore>,
 
-    pub tex_size: Vec2u32,
+    pub texture_size: Vec2u32,
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
-    pub fractal_rect: RectF64,
 
+
+     frame_rect: RectF64,
+    pub fractal_rect: RectF64,
+    pub fractal_rect_prev: RectF64,
     fractal_scale: f64,
 }
 
@@ -54,10 +64,11 @@ pub struct MandelTexture {
 impl MandelTexture {
     pub fn new(
         device: &wgpu::Device,
+        renderer: &WgpuRenderer,
         window_size: Vec2u32,
     ) -> Self {
         let tex_size =
-            1024 * 6
+            1024 * 3
             // device.limits().max_texture_dimension_2d
             ;
         assert!(tex_size >= 1024);
@@ -78,6 +89,18 @@ impl MandelTexture {
             label: None,
         });
         let texture_view1 = texture1.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let texture2 = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+            label: None,
+        });
+        let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
         assert_eq!(tex_size % TILE_SIZE, 0);
         let tile_count = tex_size / TILE_SIZE;
@@ -102,21 +125,57 @@ impl MandelTexture {
         let cpu_core_count = num_cpus::get_physical();
         let semaphore = Arc::new(Semaphore::new(cpu_core_count * 2));
 
+        let bind_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &renderer.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view1),
+                },
+            ],
+            label: None,
+        });
+        let bind_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &renderer.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&texture_view2),
+                },
+            ],
+            label: None,
+        });
+
         Self {
             texture1,
             texture_view1,
+            bind_group1,
+
+            texture2,
+            texture_view2,
+            bind_group2,
 
             window_size,
 
             runtime,
             semaphore,
 
-            tex_size: Vec2u32::all(tex_size),
+            texture_size: Vec2u32::all(tex_size),
             max_iter: 100,
             tiles,
 
-            fractal_rect: RectF64::zeroed(),
+            frame_rect: RectF64::zeroed(),
             fractal_scale: 1.0,
+            fractal_rect: RectF64::zeroed(),
+            fractal_rect_prev: RectF64::zeroed(),
         }
     }
 
@@ -128,12 +187,16 @@ impl MandelTexture {
     )
     where F: Fn(usize) + Clone + Send + Sync + 'static
     {
+        self.frame_rect = frame_rect;
         let scale_changed = frame_rect.size.length_squared() != self.fractal_scale;
-        if scale_changed {
+        let off_frame = !self.fractal_rect.contains(&frame_rect);
+        let frame_changed = off_frame || scale_changed;
+        if frame_changed {
+            self.fractal_rect_prev = self.fractal_rect;
             self.fractal_scale = frame_rect.size.length_squared();
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
-                Vec2f64::all(frame_rect.size.x * self.tex_size.x as f64 / self.window_size.x as f64),
+                Vec2f64::all(frame_rect.size.x * self.texture_size.x as f64 / self.window_size.x as f64),
             );
             // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
@@ -144,11 +207,11 @@ impl MandelTexture {
 
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = a.fractal_rect(
-                self.tex_size,
+                self.texture_size,
                 fractal_rect,
             ).center();
             let b_center = b.fractal_rect(
-                self.tex_size,
+                self.texture_size,
                 fractal_rect,
             ).center();
 
@@ -164,7 +227,7 @@ impl MandelTexture {
                 let mut tile_state_mutex = tile.state.lock().unwrap();
                 let tile_state = &mut *tile_state_mutex;
 
-                if scale_changed {
+                if frame_changed {
                     tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let TileState::Computing { task_handle } = tile_state {
                         task_handle.abort();
@@ -173,7 +236,7 @@ impl MandelTexture {
                 }
 
                 let tile_rect = tile.fractal_rect(
-                    self.tex_size,
+                    self.texture_size,
                     self.fractal_rect,
                 );
                 if !frame_rect.intersects(&tile_rect) {
@@ -189,7 +252,7 @@ impl MandelTexture {
                     return;
                 }
 
-                let img_size = self.tex_size;
+                let img_size = self.texture_size;
                 let tile_rect = tile.tex_rect;
                 let tile_index = tile.index;
 
@@ -228,7 +291,7 @@ impl MandelTexture {
             });
     }
 
-    pub fn render(&self, render_info: &RenderInfo) {
+    pub fn render(&self, render_info: &RenderInfo, renderer: &WgpuRenderer){
         self.tiles
             .iter()
             .for_each(|tile| {
@@ -273,6 +336,56 @@ impl MandelTexture {
                     },
                 );
             });
+
+        let tex_size = Vec2f32::from(self.texture_size);
+        let win_size = Vec2f32::from(self.window_size);
+        let scale = tex_size / win_size;
+        let offset =
+            2.0 * (self.fractal_rect.center() - self.frame_rect.center())
+                / self.frame_rect.size;
+
+        let mut command_encoder = render_info.device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        {
+            let mut render_pass = command_encoder
+                .begin_render_pass(
+                    &wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: render_info.view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: true,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: None,
+                    }
+                );
+
+            render_pass.set_pipeline(&renderer.pipeline);
+            render_pass.set_vertex_buffer(0, renderer.screen_rect_buf.slice(..));
+
+
+            let mut pc = PushConst::new();
+            pc.proj_mat
+                .translate2d(Vec2f32::from(offset))
+                .scale(scale);
+
+            render_pass.set_push_constants(
+                wgpu::ShaderStages::VERTEX,
+                0,
+                pc.as_bytes(),
+            );
+
+            render_pass.set_bind_group(0, &self.bind_group1, &[]);
+            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+        }
+
+        render_info.queue.submit(Some(command_encoder.finish()));
     }
 
     pub fn resize_window(&mut self, window_size: Vec2u32) {
@@ -306,7 +419,7 @@ async fn mandelbrot(
     cancel_token_value: u32,
 ) -> anyhow::Result<Vec<u8>>
 {
-    let now = Instant::now();
+    let _now = Instant::now();
 
     let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
     let width = img_size.x as f64;
@@ -346,7 +459,7 @@ async fn mandelbrot(
     }
 
     if false {
-        let elapsed = now.elapsed();
+        // let elapsed = now.elapsed();
         //println!("Elapsed: {}ms", elapsed.as_millis());
         // let target = Duration::from_millis(100);
         // if elapsed < target {

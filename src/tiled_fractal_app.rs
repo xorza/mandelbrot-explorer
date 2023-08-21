@@ -10,7 +10,7 @@ use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::{RectF64, Vec2f64, Vec2i32, Vec2u32};
-use crate::wgpu_renderer::{ScreenTexBindGroup, WgpuRenderer};
+use crate::wgpu_renderer::{ WgpuRenderer};
 
 enum ManipulateState {
     Idle,
@@ -18,8 +18,9 @@ enum ManipulateState {
 }
 
 pub struct TiledFractalApp {
-    window_size: Vec2u32,
     renderer: WgpuRenderer,
+
+    window_size: Vec2u32,
     event_loop: EventLoopProxy<UserEvent>,
     runtime: Runtime,
 
@@ -29,9 +30,6 @@ pub struct TiledFractalApp {
     aspect: Vec2f64,
 
     mandel_texture: MandelTexture,
-    screen_tex_bind_group: ScreenTexBindGroup,
-
-    has_update_tiles: bool,
 }
 
 
@@ -56,27 +54,8 @@ impl App for TiledFractalApp {
         let window_size = Vec2u32::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
-        let mandel_texture = MandelTexture::new(device, window_size);
+        let mandel_texture = MandelTexture::new(device, &renderer, window_size);
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &renderer.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&renderer.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&mandel_texture.texture_view1),
-                },
-            ],
-            label: None,
-        });
-
-        let screen_tex_bind_group = ScreenTexBindGroup {
-            bind_group,
-            texture_size: mandel_texture.tex_size,
-        };
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
         let frame_rect = RectF64::center_size(
@@ -85,8 +64,9 @@ impl App for TiledFractalApp {
         );
 
         Self {
-            window_size,
             renderer,
+
+            window_size,
             event_loop: event_loop_proxy,
             runtime: Runtime::new().unwrap(),
 
@@ -96,9 +76,6 @@ impl App for TiledFractalApp {
             aspect,
 
             mandel_texture,
-            screen_tex_bind_group,
-
-            has_update_tiles: false,
         }
     }
 
@@ -151,26 +128,19 @@ impl App for TiledFractalApp {
         result
     }
 
-    fn render(&mut self, render_info: RenderInfo) {
-        if self.has_update_tiles {
-            self.has_update_tiles = false;
-            self.update_tiles(&render_info);
-        }
+    fn render(&mut self, render_info: &RenderInfo) {
 
-        let offset =
-            2.0 * (self.mandel_texture.fractal_rect.center() - self.frame_rect.center())
-                / self.frame_rect.size
-            ;
-        // println!("offset: {:?}", offset);
 
-        self.renderer.go(
-            &render_info,
-            &self.screen_tex_bind_group,
-            offset,
-        );
+        self.mandel_texture.render(render_info,&self.renderer );
+
+        // self.renderer.go(
+        //     &render_info,
+        //     &self.screen_tex_bind_group,
+        //     offset,
+        // );
     }
 
-    fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32) {
+    fn resize(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, window_size: Vec2u32) {
         if self.window_size == window_size {
             return;
         }
@@ -180,7 +150,6 @@ impl App for TiledFractalApp {
             self.frame_rect.size * Vec2f64::from(window_size) / Vec2f64::from(self.window_size),
         );
         self.window_size = window_size;
-        self.renderer.resize(device, queue, window_size);
         self.mandel_texture.resize_window(window_size);
 
         self.update_fractal(self.frame_rect.center());
@@ -222,7 +191,6 @@ impl TiledFractalApp {
         match event {
             UserEvent::Redraw => EventResult::Redraw,
             UserEvent::TileReady { tile_index: _tile_index } => {
-                self.has_update_tiles = true;
                 EventResult::Redraw
             }
         }
@@ -243,9 +211,5 @@ impl TiledFractalApp {
                 ).unwrap();
             },
         );
-    }
-
-    fn update_tiles(&self, render_info: &RenderInfo) {
-        self.mandel_texture.render(render_info);
     }
 }

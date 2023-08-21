@@ -2,14 +2,8 @@ use std::borrow::Cow;
 
 use wgpu::util::DeviceExt;
 
-use crate::app_base::RenderInfo;
-use crate::math::{Vec2f32, Vec2f64, Vec2u32};
+use crate::math::{Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
-
-pub struct ScreenTexBindGroup {
-    pub bind_group: wgpu::BindGroup,
-    pub texture_size: Vec2u32,
-}
 
 pub struct WgpuRenderer {
     pub window_size: Vec2u32,
@@ -131,66 +125,4 @@ impl WgpuRenderer {
         }
     }
 
-    pub fn go(
-        &mut self,
-        render_info: &RenderInfo,
-        screen_tex_bind_group: &ScreenTexBindGroup,
-        offset: Vec2f64,
-    ) {
-        let tex_size = Vec2f32::from(screen_tex_bind_group.texture_size);
-        let win_size = Vec2f32::from(self.window_size);
-        let scale = tex_size / win_size;
-
-
-        let mut command_encoder = render_info.device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        {
-            let mut render_pass = command_encoder
-                .begin_render_pass(
-                    &wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: render_info.view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            }),
-                        ],
-                        depth_stencil_attachment: None,
-                    }
-                );
-
-            render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
-
-
-            let mut pc = PushConst::new();
-            pc.proj_mat
-                .translate2d(Vec2f32::from(offset))
-                .scale(scale);
-
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                pc.as_bytes(),
-            );
-
-            render_pass.set_bind_group(0, &screen_tex_bind_group.bind_group, &[]);
-            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
-        }
-
-        render_info.queue.submit(Some(command_encoder.finish()));
-    }
-
-    pub(crate) fn resize(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, window_size: Vec2u32) {
-        if self.window_size == window_size {
-            return;
-        }
-
-        self.window_size = window_size;
-    }
 }

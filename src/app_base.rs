@@ -26,7 +26,7 @@ pub trait App: 'static + Sized {
         event_loop_proxy: EventLoopProxy<Self::UserEventType>,
     ) -> Self;
     fn update(&mut self, event: Event<Self::UserEventType>) -> EventResult;
-    fn render(&mut self, render: RenderInfo);
+    fn render(&mut self, render: &RenderInfo);
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32);
 }
 
@@ -186,7 +186,7 @@ fn start<AppType: App>(
                 device.push_error_scope(wgpu::ErrorFilter::Validation);
                 has_error_scope = true;
 
-                app.render(RenderInfo {
+                app.render(&RenderInfo {
                     device: &device,
                     queue: &queue,
                     view: &surface_texture_view,
