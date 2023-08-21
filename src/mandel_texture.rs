@@ -404,8 +404,6 @@ impl MandelTexture {
         let fractal_rect = self.fractal_rect;
         let max_iterations = 255 + (8.0 * (1.0 / fractal_rect.size.length_squared()).log2()) as u32;
 
-        println!("max_iterations: {}", max_iterations);
-
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = a.fractal_rect(
                 self.texture_size,
