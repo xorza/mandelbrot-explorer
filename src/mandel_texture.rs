@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use bytemuck::Zeroable;
-use num_complex::Complex;
+use num_complex::{Complex, ComplexFloat};
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -645,6 +645,8 @@ async fn mandelbrot(
     let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
     let scale = fractal_scale;
 
+    let mut max_color = 0.0f64;
+
     for y in 0..tile_rect.size.y {
         for x in 0..tile_rect.size.x {
             if x % 32 == 0 {
@@ -662,15 +664,24 @@ async fn mandelbrot(
             let c: Complex<f64> = Complex::new(cx, cy);
             let mut z: Complex<f64> = Complex::new(0.0, 0.0);
 
-            let mut it: u32 = 0;
-            const MAX_IT: u32 = 256;
+            let mut i: u32 = 0;
+            const MAX_IT: u32 = 255;
 
-            while z.norm() <= 8.0 && it <= MAX_IT {
+            while z.norm() <= 2.0 && i < MAX_IT {
                 z = z * z + c;
-                it += 1;
+                i += 1;
             }
 
-            buffer[(y * tile_rect.size.x + x) as usize] = it as u8;
+            let result: u8 = if i == MAX_IT {
+                0
+            } else {
+                // let smoothed = (z.norm_sqr().log2() / 2.0).log2();
+                let color = 255.0 - (i as f64).powf(0.7) * (255.0 / 255.0.powf(0.7));
+
+                color as u8
+            };
+
+            buffer[(y * tile_rect.size.x + x) as usize] = result;
         }
     }
 
@@ -683,6 +694,8 @@ async fn mandelbrot(
         //     thread::sleep(target - elapsed);
         // }
     }
+
+    // println!("max_color: {}", max_color);
 
     Ok(buffer)
 }
