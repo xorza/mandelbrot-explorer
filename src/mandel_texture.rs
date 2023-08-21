@@ -2,17 +2,15 @@ use std::borrow::Cow;
 use std::mem::swap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
-use std::time::Instant;
 
-use anyhow::anyhow;
 use bytemuck::Zeroable;
-use num_complex::{Complex, ComplexFloat};
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
+use crate::mandelbrot::mandelbrot;
 use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
 
@@ -51,7 +49,7 @@ pub struct MandelTexture {
     runtime: Runtime,
     semaphore: Arc<Semaphore>,
 
-    pub texture_size: Vec2u32,
+    pub texture_size: u32,
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
 
@@ -75,15 +73,15 @@ impl MandelTexture {
         surface_config: &wgpu::SurfaceConfiguration,
         window_size: Vec2u32,
     ) -> Self {
-        let tex_size =
+        let texture_size =
             1024 * 8
             // device.limits().max_texture_dimension_2d
             ;
-        assert!(tex_size >= 1024);
+        assert!(texture_size >= 1024);
 
         let texture_extent = wgpu::Extent3d {
-            width: tex_size,
-            height: tex_size,
+            width: texture_size,
+            height: texture_size,
             depth_or_array_layers: 1,
         };
 
@@ -111,8 +109,8 @@ impl MandelTexture {
         });
         let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
-        assert_eq!(tex_size % TILE_SIZE, 0);
-        let tile_count = tex_size / TILE_SIZE;
+        assert_eq!(texture_size % TILE_SIZE, 0);
+        let tile_count = texture_size / TILE_SIZE;
         let mut tiles = Vec::with_capacity(tile_count as usize * tile_count as usize);
         for i in 0..tile_count {
             for j in 0..tile_count {
@@ -360,7 +358,7 @@ impl MandelTexture {
             runtime,
             semaphore,
 
-            texture_size: Vec2u32::all(tex_size),
+            texture_size,
             max_iter: 100,
             tiles,
 
@@ -395,7 +393,7 @@ impl MandelTexture {
             self.fractal_scale = frame_rect.size.length_squared();
             self.fractal_rect = RectF64::center_size(
                 frame_rect.center(),
-                Vec2f64::all(frame_rect.size.x * self.texture_size.x as f64 / self.window_size.x as f64),
+                Vec2f64::all(frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64),
             );
             // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
@@ -609,7 +607,7 @@ impl MandelTexture {
     }
 
     fn surface_render(&self, render_info: &RenderInfo) {
-        let tex_size = Vec2f32::from(self.texture_size);
+        let tex_size = Vec2f32::all(self.texture_size as f32);
         let win_size = Vec2f32::from(self.window_size);
         let scale = tex_size / win_size;
         let offset =
@@ -666,8 +664,8 @@ impl MandelTexture {
 }
 
 impl Tile {
-    pub(crate) fn fractal_rect(&self, tex_size: Vec2u32, fractal_rect: RectF64) -> RectF64 {
-        let abs_frame_size = Vec2f64::from(tex_size);
+    pub(crate) fn fractal_rect(&self, tex_size: u32, fractal_rect: RectF64) -> RectF64 {
+        let abs_frame_size = Vec2f64::all(tex_size as f64);
         let abs_tile_pos = Vec2f64::from(self.tex_rect.pos);
         let abs_tile_size = Vec2f64::from(self.tex_rect.size);
 
@@ -676,98 +674,7 @@ impl Tile {
         let tile_pos =
             fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
 
-
         RectF64::pos_size(tile_pos, tile_size)
     }
 }
 
-
-fn is_in_main_cardioid(x: f64, y: f64) -> bool {
-    let q = (x - 0.25).powi(2) + y.powi(2);
-    let result = q * (q + (x - 0.25)) < 0.25 * y.powi(2);
-    result
-}
-fn is_in_main_circle(x: f64, y: f64) -> bool {
-    let q = (x + 1.0).powi(2) + y.powi(2);
-    let result = q < 0.25.powi(2);
-    result
-}
-
-//noinspection RsConstantConditionIf
-async fn mandelbrot(
-    img_size: Vec2u32,
-    tile_rect: RectU32,
-    fractal_offset: Vec2f64,
-    fractal_scale: f64,
-    max_iterations: u32,
-    cancel_token: Arc<AtomicU32>,
-    cancel_token_value: u32,
-) -> anyhow::Result<Vec<u8>>
-{
-    let _now = Instant::now();
-
-    let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
-    let width = img_size.x as f64;
-    let height = img_size.y as f64;
-
-    // center
-    let offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
-    let scale = fractal_scale;
-
-    for y in 0..tile_rect.size.y {
-        for x in 0..tile_rect.size.x {
-            if x % 32 == 0 {
-                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
-                    return Err(anyhow!("Cancelled"));
-                }
-            }
-
-            let cx = ((x + tile_rect.pos.x) as f64) / width;
-            let cy = ((y + tile_rect.pos.y) as f64) / height;
-
-            let cx = (cx - 0.5) / scale - offset.x;
-            let cy = (cy - 0.5) / scale - offset.y;
-
-            let result =
-                if is_in_main_cardioid(cx, cy) || is_in_main_circle(cx, cy) {
-                    0
-                } else {
-                    let c: Complex<f64> = Complex::new(cx, cy);
-                    let mut z: Complex<f64> = Complex::new(0.0, 0.0);
-
-                    let mut i: u32 = 0;
-
-                    while z.norm() <= 4.0 && i < max_iterations {
-                        z = z * z + c;
-                        i += 1;
-                    }
-
-                    let result: u8 = if i == max_iterations {
-                        0
-                    } else {
-                        let i = (i as f64 / max_iterations as f64).powf(0.7);
-                        let color = 255.0 - 255.0 * i;
-
-                        color as u8
-                    };
-
-                    result
-                };
-
-            buffer[(y * tile_rect.size.x + x) as usize] = result;
-        }
-    }
-
-    if false {
-        // let elapsed = now.elapsed();
-        //println!("Elapsed: {}ms", elapsed.as_millis());
-        // let target = Duration::from_millis(100);
-        // if elapsed < target {
-        //     tokio::time::sleep(target - elapsed).await;
-        //     thread::sleep(target - elapsed);
-        // }
-    }
-
-
-    Ok(buffer)
-}

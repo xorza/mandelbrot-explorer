@@ -10,6 +10,7 @@ mod math;
 mod render_pods;
 mod mandel_texture;
 mod tiled_fractal_app;
+mod mandelbrot;
 
 
 fn main() {

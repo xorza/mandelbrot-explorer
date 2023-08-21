@@ -1,5 +1,7 @@
 /target
 
+/test_output
+
 /.idea/shelf/
 /.idea/workspace.xml
 /Cargo.lock
