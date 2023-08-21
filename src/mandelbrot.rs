@@ -29,7 +29,7 @@ pub async fn mandelbrot(
     let tile_offset = Vec2f64::from(tile_rect.pos);
 
     let pixel_offset = 1.0 / (scale * image_size);
-    let sample_offset = pixel_offset * 0.25;
+    let sample_offset = 0.25 * pixel_offset;
     let sample_offsets = [
         Vec2f64::new(-sample_offset, -sample_offset),
         Vec2f64::new(-sample_offset, sample_offset),
