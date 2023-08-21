@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::mem::swap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
@@ -193,7 +192,7 @@ impl MandelTexture {
             &img.as_bytes(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(256*4),
+                bytes_per_row: Some(256 * 4),
                 rows_per_image: Some(1),
             },
             wgpu::Extent3d {
@@ -402,8 +401,10 @@ impl MandelTexture {
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
         }
 
-
         let fractal_rect = self.fractal_rect;
+        let max_iterations = 255 + (8.0 * (1.0 / fractal_rect.size.length_squared()).log2()) as u32;
+
+        println!("max_iterations: {}", max_iterations);
 
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = a.fractal_rect(
@@ -469,6 +470,7 @@ impl MandelTexture {
                         tile_rect,
                         -fractal_rect.center(),
                         1.0 / fractal_rect.size.y,
+                        max_iterations,
                         cancel_token,
                         cancel_token_value,
                     )
@@ -681,12 +683,25 @@ impl Tile {
     }
 }
 
+
+fn is_in_main_cardioid(x: f64, y: f64) -> bool {
+    let q = (x - 0.25).powi(2) + y.powi(2);
+    let result = q * (q + (x - 0.25)) < 0.25 * y.powi(2);
+    result
+}
+fn is_in_main_circle(x: f64, y: f64) -> bool {
+    let q = (x + 1.0).powi(2) + y.powi(2);
+    let result = q < 0.25.powi(2);
+    result
+}
+
 //noinspection RsConstantConditionIf
 async fn mandelbrot(
     img_size: Vec2u32,
     tile_rect: RectU32,
     fractal_offset: Vec2f64,
     fractal_scale: f64,
+    max_iterations: u32,
     cancel_token: Arc<AtomicU32>,
     cancel_token_value: u32,
 ) -> anyhow::Result<Vec<u8>>
@@ -715,25 +730,31 @@ async fn mandelbrot(
             let cx = (cx - 0.5) / scale - offset.x;
             let cy = (cy - 0.5) / scale - offset.y;
 
-            let c: Complex<f64> = Complex::new(cx, cy);
-            let mut z: Complex<f64> = Complex::new(0.0, 0.0);
+            let result =
+                if is_in_main_cardioid(cx, cy) || is_in_main_circle(cx, cy) {
+                    0
+                } else {
+                    let c: Complex<f64> = Complex::new(cx, cy);
+                    let mut z: Complex<f64> = Complex::new(0.0, 0.0);
 
-            let mut i: u32 = 0;
-            const MAX_IT: u32 = 255;
+                    let mut i: u32 = 0;
 
-            while z.norm() <= 2.0 && i < MAX_IT {
-                z = z * z + c;
-                i += 1;
-            }
+                    while z.norm() <= 4.0 && i < max_iterations {
+                        z = z * z + c;
+                        i += 1;
+                    }
 
-            let result: u8 = if i == MAX_IT {
-                0
-            } else {
-                // let smoothed = (z.norm_sqr().log2() / 2.0).log2();
-                let color = 255.0 - (i as f64).powf(0.7) * (255.0 / 255.0.powf(0.7));
+                    let result: u8 = if i == max_iterations {
+                        0
+                    } else {
+                        let i = (i as f64 / max_iterations as f64).powf(0.7);
+                        let color = 255.0 - 255.0 * i;
 
-                color as u8
-            };
+                        color as u8
+                    };
+
+                    result
+                };
 
             buffer[(y * tile_rect.size.x + x) as usize] = result;
         }

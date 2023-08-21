@@ -82,6 +82,9 @@ impl Vec2f32 {
     pub fn all(v: f32) -> Self {
         Self { x: v, y: v }
     }
+    pub fn length_squared(self) -> f32 {
+        self.x * self.x + self.y * self.y
+    }
 }
 
 impl Vec2f64 {
