@@ -471,15 +471,18 @@ impl MandelTexture {
             render_pass.set_pipeline(&self.blit_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
-            let offset = (self.fractal_rect_prev.center() - self.fractal_rect.center())
-                / self.fractal_rect.size;
-            let offset = Vec2f64::new(offset.x, offset.y);
+            let offset =
+                (self.fractal_rect_prev.center() - self.fractal_rect.center())
+                    / self.fractal_rect_prev.size
+                ;
+            let offset = 2.0 * Vec2f64::new(offset.x, -offset.y);
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
-            println!("offset: {:?}, scale: {:?}", offset, scale);
+
+            // println!("blit offset: {:?}, scale: {:?}", offset, scale);
             let mut pc = PushConst::new();
             pc.proj_mat
-                .translate2d(Vec2f32::from(offset))
                 .scale(Vec2f32::from(scale))
+                .translate2d(Vec2f32::from(offset))
             ;
 
             render_pass.set_push_constants(
@@ -556,6 +559,8 @@ impl MandelTexture {
         let offset =
             2.0 * (self.fractal_rect.center() - self.frame_rect.center())
                 / self.frame_rect.size;
+
+        // println!( "render offset: {:?}, scale: {:?}", offset, scale);
 
         let mut command_encoder = render_info.device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });

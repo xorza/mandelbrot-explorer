@@ -17,7 +17,7 @@ fn vs_main(
 ) -> VertexOutput {
     var result: VertexOutput;
     result.position = pc.proj_mat * position;
-    result.tex_coord = tex_coord;
+    result.tex_coord = vec2<f32>(tex_coord.x, 1.0 - tex_coord.y);
 
     return result;
 }
