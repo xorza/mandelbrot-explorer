@@ -33,7 +33,6 @@ pub trait App: 'static + Sized {
 struct Setup<UserEventType: 'static> {
     window: winit::window::Window,
     event_loop: EventLoop<UserEventType>,
-    instance: wgpu::Instance,
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface,
     adapter: wgpu::Adapter,
@@ -91,7 +90,6 @@ fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
     Setup {
         window,
         event_loop,
-        instance,
         size,
         surface,
         adapter,
@@ -104,7 +102,6 @@ fn start<AppType: App>(
     Setup {
         window,
         event_loop,
-        instance,
         size,
         surface,
         adapter,
@@ -133,7 +130,11 @@ fn start<AppType: App>(
     }
 
     event_loop.run(move |event, _target, control_flow| {
-        let _ = (&instance, &adapter); // force ownership by the closure
+        if matches!(event, winit::event::Event::MainEventsCleared) {
+            *control_flow = ControlFlow::Wait;
+            return;
+        }
+
         let mut result: EventResult = EventResult::Continue;
 
         match event {
