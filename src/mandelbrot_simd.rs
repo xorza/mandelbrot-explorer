@@ -86,7 +86,8 @@ pub async fn mandelbrot_simd(
     }
 
 
-    let mut multisampled_pixels_count = 0;
+    let mut multisampled_pixels_count: usize;
+
     { // multisample
         let capacity = (tile_rect.size.x * tile_rect.size.y) as usize;
         let mut multisample_queue: Vec<usize> = Vec::with_capacity(capacity);
@@ -115,7 +116,7 @@ pub async fn mandelbrot_simd(
             }
         }
 
-        multisampled_pixels_count += multisample_queue.len();
+        multisampled_pixels_count = multisample_queue.len();
 
         let mut cx_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT as usize);
         let mut cy_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT as usize);
