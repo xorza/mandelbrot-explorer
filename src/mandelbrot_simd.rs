@@ -37,10 +37,9 @@ pub async fn mandelbrot_simd(
     let buffer_frame = {
         let image_size = image_size as f64;
         let fractal_offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
-        let tile_offset = Vec2f64::from(tile_rect.pos);
 
         RectF64::from_pos_size(
-            (tile_offset / image_size - 0.5) / fractal_scale - fractal_offset,
+            (Vec2f64::from(tile_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
             (Vec2f64::from(tile_rect.size) / image_size) / fractal_scale,
         )
     };
