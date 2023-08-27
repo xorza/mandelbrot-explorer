@@ -11,14 +11,13 @@ use crate::env::is_test_build;
 use crate::math::{RectF64, RectU32, Vec2f64};
 
 const MULTISAMPLE_THRESHOLD: u8 = 64;
+const SIMD_LANE_COUNT: usize = 8;
 
-// @formatter:off
-const SIMD_LANE_COUNT: u32 =        8;
-type f64simd    = std::simd::   f64x8;
-type i64simd    = std::simd::   i64x8;
-type mask64simd = std::simd::mask64x8;
-type CountSimd =               [u8; 8];
-// @formatter:on
+type f64simd = std::simd::Simd<f64, SIMD_LANE_COUNT>;
+type i64simd = std::simd::Simd<i64, SIMD_LANE_COUNT>;
+type mask64simd = std::simd::Mask<i64, SIMD_LANE_COUNT>;
+type CountSimd = [u8; SIMD_LANE_COUNT];
+
 
 //noinspection RsConstantConditionIf
 pub async fn mandelbrot_simd(
@@ -64,14 +63,14 @@ pub async fn mandelbrot_simd(
             .collect::<Vec<f64>>();
 
         for y in 0..tile_rect.size.y {
-            for x in 0..tile_rect.size.x / SIMD_LANE_COUNT {
-                if (x * SIMD_LANE_COUNT) % 32 == 0 {
+            for x in 0..tile_rect.size.x / SIMD_LANE_COUNT as u32 {
+                if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
                     if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
                         return Err(anyhow!("Cancelled"));
                     }
                 }
 
-                let cx = f64simd::from_slice(x_init.as_slice()) + f64simd::splat((x * SIMD_LANE_COUNT) as f64);
+                let cx = f64simd::from_slice(x_init.as_slice()) + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
                 let cx = cx * f64simd::splat(buffer_frame.size.x / tile_rect.size.x as f64);
                 let cx = cx + f64simd::splat(buffer_frame.pos.x);
 
@@ -79,18 +78,22 @@ pub async fn mandelbrot_simd(
 
                 let values_simd = pixel(max_iterations, cx, cy);
 
-                let index = (y * tile_rect.size.x + x * SIMD_LANE_COUNT) as usize;
-                buffer[index..index + SIMD_LANE_COUNT as usize].copy_from_slice(values_simd.as_slice());
+                let index = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+                buffer[index..index + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
             }
         }
     }
 
 
-    let multisampled_pixels_count: usize;
+    let mut multisampled_pixels_count: usize = 0;
 
     { // multisample
-        let capacity = (tile_rect.size.x * tile_rect.size.y) as usize;
-        let mut multisample_queue: Vec<usize> = Vec::with_capacity(capacity);
+        let mut cx_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
+        let mut cy_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
+        let mut loaded_indexes: Vec<usize> = Vec::with_capacity(SIMD_LANE_COUNT);
+
+        let mut acc_index = usize::MAX;
+        let mut acc_value: u16 = 0;
 
         for y in 0..tile_rect.size.y {
             for x in 0..tile_rect.size.x {
@@ -111,55 +114,41 @@ pub async fn mandelbrot_simd(
                             && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD);
 
                 if should_multisample {
-                    multisample_queue.push(index);
-                }
-            }
-        }
+                    multisampled_pixels_count += 1;
 
-        multisampled_pixels_count = multisample_queue.len();
+                    let xy = buffer_frame.pos
+                        + buffer_frame.size * Vec2f64::new(x as f64, y as f64) / Vec2f64::from(tile_rect.size);
 
-        let mut cx_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT as usize);
-        let mut cy_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT as usize);
-        let mut loaded_indexes: Vec<usize> = Vec::with_capacity(SIMD_LANE_COUNT as usize);
+                    for sample_offset in &sample_offsets {
+                        let xy = xy + *sample_offset;
 
-        let mut acc_index = usize::MAX;
-        let mut acc_value: u16 = 0;
+                        cx_load.push(xy.x);
+                        cy_load.push(xy.y);
+                        loaded_indexes.push(index);
 
-        for buffer_index in multisample_queue {
-            let x = (buffer_index as u32 % tile_rect.size.x) as f64;
-            let y = (buffer_index as u32 / tile_rect.size.x) as f64;
+                        if cx_load.len() == SIMD_LANE_COUNT {
+                            let cx = f64simd::from_slice(cx_load.as_slice());
+                            let cy = f64simd::from_slice(cy_load.as_slice());
 
-            let xy = buffer_frame.pos
-                + buffer_frame.size * (Vec2f64::new(x, y) / Vec2f64::from(tile_rect.size));
+                            let values_simd = pixel(max_iterations, cx, cy);
+                            for (simd_index, &buffer_index) in loaded_indexes.iter().enumerate() {
+                                if buffer_index != acc_index {
+                                    if acc_index != usize::MAX {
+                                        buffer[acc_index] = (acc_value / 4) as u8;
+                                    }
 
-            for sample_offset in &sample_offsets {
-                let xy = xy + *sample_offset;
+                                    acc_index = buffer_index;
+                                    acc_value = value as u16;
+                                }
 
-                cx_load.push(xy.x);
-                cy_load.push(xy.y);
-                loaded_indexes.push(buffer_index);
-
-                if cx_load.len() == SIMD_LANE_COUNT as usize {
-                    let cx = f64simd::from_slice(cx_load.as_slice());
-                    let cy = f64simd::from_slice(cy_load.as_slice());
-
-                    let values_simd = pixel(max_iterations, cx, cy);
-                    for (simd_index, &buffer_index) in loaded_indexes.iter().enumerate() {
-                        if buffer_index != acc_index {
-                            if acc_index != usize::MAX {
-                                buffer[acc_index] = (acc_value / 4) as u8;
+                                acc_value += values_simd[simd_index] as u16;
                             }
 
-                            acc_index = buffer_index;
-                            acc_value = buffer[acc_index] as u16;
+                            cx_load.clear();
+                            cy_load.clear();
+                            loaded_indexes.clear();
                         }
-
-                        acc_value += values_simd[simd_index] as u16;
                     }
-
-                    cx_load.clear();
-                    cy_load.clear();
-                    loaded_indexes.clear();
                 }
             }
         }
