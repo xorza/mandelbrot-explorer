@@ -97,9 +97,9 @@ pub async fn mandelbrot_simd(
         for y in 0..tile_rect.size.y {
             for x in 0..tile_rect.size.x {
                 let index = (y * tile_rect.size.x + x) as usize;
-                let value = buffer[index];
+                let should_multisample = {
+                    let value = buffer[index];
 
-                let should_multisample =
                     (x != tile_rect.size.x - 1
                         && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize]) > MULTISAMPLE_THRESHOLD)
                         ||
@@ -110,7 +110,8 @@ pub async fn mandelbrot_simd(
                             && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD)
                         ||
                         (y != 0
-                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD);
+                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD)
+                };
 
                 if should_multisample {
                     multisampled_pixels_count += 1;
@@ -118,7 +119,7 @@ pub async fn mandelbrot_simd(
                     let xy = buffer_frame.pos
                         + buffer_frame.size * Vec2f64::new(x as f64, y as f64) / Vec2f64::from(tile_rect.size);
 
-                    for sample_offset in &sample_offsets {
+                    for sample_offset in &sample_offsets[1..3] {
                         let xy = xy + *sample_offset;
 
                         cx_load.push(xy.x);
@@ -137,7 +138,7 @@ pub async fn mandelbrot_simd(
                                     }
 
                                     acc_index = buffer_index;
-                                    acc_value = value as u16;
+                                    acc_value = buffer[acc_index] as u16;
                                 }
 
                                 acc_value += values_simd[simd_index] as u16;
