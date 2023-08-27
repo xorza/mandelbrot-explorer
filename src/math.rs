@@ -580,7 +580,7 @@ impl Default for Mat4x4f32 {
 
 
 impl RectU32 {
-    pub fn new(pos: Vec2u32, size: Vec2u32) -> Self {
+    pub fn from_pos_size(pos: Vec2u32, size: Vec2u32) -> Self {
         Self {
             pos,
             size,
@@ -595,11 +595,14 @@ impl RectU32 {
     pub fn center(&self) -> Vec2u32 {
         self.pos + self.size / 2
     }
+    pub fn upper_right(&self) -> Vec2u32 {
+        self.pos + self.size
+    }
 }
 
 
 impl RectI32 {
-    pub fn new(pos: Vec2i32, size: Vec2i32) -> Self {
+    pub fn from_pos_size(pos: Vec2i32, size: Vec2i32) -> Self {
         Self {
             pos,
             size,
@@ -626,13 +629,13 @@ impl From<RectU32> for RectI32 {
 
 
 impl RectF64 {
-    pub fn pos_size(pos: Vec2f64, size: Vec2f64) -> Self {
+    pub fn from_pos_size(pos: Vec2f64, size: Vec2f64) -> Self {
         Self {
             pos,
             size,
         }
     }
-    pub fn center_size(center: Vec2f64, size: Vec2f64) -> Self {
+    pub fn from_center_size(center: Vec2f64, size: Vec2f64) -> Self {
         Self {
             pos: center - size / 2.0,
             size,
@@ -652,6 +655,9 @@ impl RectF64 {
     }
     pub fn center(&self) -> Vec2f64 {
         self.pos + self.size / 2.0
+    }
+    pub fn upper_right(&self) -> Vec2f64 {
+        self.pos + self.size
     }
 }
 

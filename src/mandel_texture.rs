@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::mandelbrot::mandelbrot;
+use crate::mandelbrot_simd::mandelbrot_simd;
 use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
 
@@ -391,7 +391,7 @@ impl MandelTexture {
             self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
             self.fractal_scale = frame_rect.size.length_squared();
-            self.fractal_rect = RectF64::center_size(
+            self.fractal_rect = RectF64::from_center_size(
                 frame_rect.center(),
                 Vec2f64::all(frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64),
             );
@@ -461,7 +461,7 @@ impl MandelTexture {
 
                 let task_handle = self.runtime.spawn(async move {
                     let _ = semaphore.acquire().await.unwrap();
-                    let buf = mandelbrot(
+                    let buf = mandelbrot_simd(
                         img_size,
                         tile_rect,
                         -fractal_rect.center(),
@@ -674,7 +674,7 @@ impl Tile {
         let tile_pos =
             fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
 
-        RectF64::pos_size(tile_pos, tile_size)
+        RectF64::from_pos_size(tile_pos, tile_size)
     }
 }
 

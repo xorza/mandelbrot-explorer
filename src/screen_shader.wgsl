@@ -36,6 +36,7 @@ var palette: texture_1d<f32>;
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let r = textureSample(color, the_sampler, vertex.tex_coord).r;
+//    return vec4<f32>(r, r, r, 1.0);
     let rgb = textureSample(palette, the_sampler, r).rgb;
     return vec4<f32>(rgb, 1.0);
 }

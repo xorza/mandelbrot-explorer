@@ -53,7 +53,7 @@ impl App for TiledFractalApp {
         let mandel_texture = MandelTexture::new(device, queue, surface_config, window_size);
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
-        let frame_rect = RectF64::center_size(
+        let frame_rect = RectF64::from_center_size(
             Vec2f64::zeroed(),
             aspect * 2.5,
         );
@@ -130,7 +130,7 @@ impl App for TiledFractalApp {
             return;
         }
 
-        self.frame_rect = RectF64::center_size(
+        self.frame_rect = RectF64::from_center_size(
             self.frame_rect.center(),
             self.frame_rect.size * Vec2f64::from(window_size) / Vec2f64::from(self.window_size),
         );
@@ -161,7 +161,7 @@ impl TiledFractalApp {
                 - mouse_delta * new_size
                 - mouse_pos * (new_size - old_size);
 
-        self.frame_rect = RectF64::center_size(
+        self.frame_rect = RectF64::from_center_size(
             new_offset,
             new_size,
         );
