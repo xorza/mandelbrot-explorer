@@ -188,6 +188,10 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut cnt = i64simd::splat(0);
     let mut escaped = mask64simd::splat(false);
 
+    let f64_4_0 = f64simd::splat(4.0);
+    let i64_0 = i64simd::splat(0);
+    let i64_1 = i64simd::splat(1);
+
     for _ in 0..max_iterations {
         (zx, zy) = {
             (
@@ -196,15 +200,15 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
             )
         };
 
-        escaped |= (zx * zx + zy * zy).simd_ge(f64simd::splat(4.0));
+        escaped |= (zx * zx + zy * zy).simd_ge(f64_4_0);
 
         if escaped.all() {
             break;
         }
 
         cnt += escaped.select(
-            i64simd::splat(0),
-            i64simd::splat(1),
+            i64_0,
+            i64_1,
         );
     }
 
