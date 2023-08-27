@@ -86,7 +86,7 @@ pub async fn mandelbrot_simd(
     }
 
 
-    let mut multisampled_pixels_count: usize;
+    let multisampled_pixels_count: usize;
 
     { // multisample
         let capacity = (tile_rect.size.x * tile_rect.size.y) as usize;
@@ -185,19 +185,18 @@ pub async fn mandelbrot_simd(
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut zx = f64simd::splat(0.0);
     let mut zy = f64simd::splat(0.0);
-
     let mut cnt = i64simd::splat(0);
     let mut escaped = mask64simd::splat(false);
 
     for _ in 0..max_iterations {
-        {
-            let zx1 = zx * zx - zy * zy + cx;
-            let zy1 = zx * zy + zx * zy + cy;
-            zx = zx1;
-            zy = zy1;
-        }
+        (zx, zy) = {
+            (
+                zx * zx - zy * zy + cx,
+                zx * zy + zx * zy + cy
+            )
+        };
 
-        escaped = escaped | (zx * zx + zy * zy).simd_ge(f64simd::splat(4.0));
+        escaped |= (zx * zx + zy * zy).simd_ge(f64simd::splat(4.0));
 
         if escaped.all() {
             break;
@@ -208,7 +207,6 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
             i64simd::splat(1),
         );
     }
-
 
     cnt
         .as_array()
