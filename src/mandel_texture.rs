@@ -142,7 +142,7 @@ impl MandelTexture {
                     shader_location: 0,
                 },
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Float32x2,
                     offset: 4 * 4,
                     shader_location: 1,
                 },
