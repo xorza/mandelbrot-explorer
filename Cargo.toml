@@ -20,7 +20,5 @@ image = "*"
 
 [profile.release]
 opt-level = 3         # Apply the highest level of optimizations.
-lto = true            # Enable Link Time Optimization
+#lto = true           # makes release build crash for unknown reason
 codegen-units = 1     # Reduce parallel code generation which can improve optimizations
-panic = 'abort'       # Abort on panic. Can have minor performance benefits over unwinding.
-debug = true          # Add debug symbols for profiling.
