@@ -284,6 +284,8 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
         let _ = event_loop;
+        self.window = None; 
+        self.fractal_app = None;
     }
 
     fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
@@ -300,7 +302,6 @@ impl<'a> AppState<'_> {
                 self.window.as_ref().unwrap().window.request_redraw();
             }
             EventResult::Exit => {
-                self.fractal_app = None;
                 event_loop.exit();
             }
         }

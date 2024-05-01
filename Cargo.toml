@@ -20,5 +20,5 @@ image = "0.25"
 
 [profile.release]
 opt-level = 3         # Apply the highest level of optimizations.
-lto = true           # makes release build crash for unknown reason
+lto = true            # Enable Link Time Optimization
 codegen-units = 1     # Reduce parallel code generation which can improve optimizations
