@@ -1,11 +1,12 @@
 use std::default::Default;
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::Limits;
-use winit::event_loop::{ EventLoop, EventLoopBuilder, EventLoopProxy};
+use winit::event_loop::{EventLoop, EventLoopBuilder, EventLoopProxy};
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2i32, Vec2u32};
@@ -18,7 +19,7 @@ pub struct RenderInfo<'a> {
 }
 
 pub trait App: 'static + Sized {
-    type UserEventType;
+    type UserEventType: Debug;
 
     fn new(
         device: &wgpu::Device,
@@ -61,8 +62,7 @@ fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
         gles_minor_version: Default::default(),
     });
     let size = window.inner_size();
-    let surface =
-        instance.create_surface(Arc::clone(&window)).unwrap();
+    let surface = instance.create_surface(window.clone()).unwrap();
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -126,6 +126,7 @@ fn start<AppType: App>(
     let start = Instant::now();
     let mut has_error_scope = false;
     let mut mouse_position: Vec2u32 = Vec2u32::zeroed();
+    let mut is_redrawing = false;
 
     match app.update(Event::Init) {
         EventResult::Continue => {}
@@ -137,78 +138,84 @@ fn start<AppType: App>(
         let mut result: EventResult = EventResult::Continue;
 
         if matches!(event, winit::event::Event::AboutToWait) {
+            if !is_redrawing {
+                return;
+            }
+
             if has_error_scope {
                 if let Some(error) = device.pop_error_scope().block_on() {
                     panic!("Device error: {:?}", error);
                 }
                 has_error_scope = false;
             }
-
+            is_redrawing = false;
             result = app.update(Event::RedrawFinished);
-            return;
-        }
+        } else {
+            match event {
+                winit::event::Event::WindowEvent {
+                    event:
+                    winit::event::WindowEvent::Resized(_)
+                    | winit::event::WindowEvent::ScaleFactorChanged { .. }
+                    , ..
+                } => {
+                    let size = window.inner_size();
+                    
+                    config.width = size.width.max(1);
+                    config.height = size.height.max(1);
+                    surface.configure(&device, &config);
 
+                    let window_size = Vec2u32::new(size.width, size.height);
 
-        match event {
-            winit::event::Event::WindowEvent {
-                event:
-                winit::event::WindowEvent::Resized(_)
-                | winit::event::WindowEvent::ScaleFactorChanged { .. }
-                , ..
-            } => {
-                config.width = size.width.max(1);
-                config.height = size.height.max(1);
-                surface.configure(&device, &config);
+                    app.resize(&device, &queue, window_size);
+                    result = app.update(Event::Resized(window_size));
+                }
 
-                let window_size = Vec2u32::new(size.width, size.height);
+                winit::event::Event::WindowEvent {
+                    event: winit::event::WindowEvent::RedrawRequested,
+                    ..
+                } => {
+                    is_redrawing = true;
 
-                app.resize(&device, &queue, window_size);
-                result = app.update(Event::Resized(window_size));
-            }
+                    let surface_texture = match surface.get_current_texture() {
+                        Ok(frame) => frame,
+                        Err(_) => {
+                            surface.configure(&device, &config);
+                            surface
+                                .get_current_texture()
+                                .expect("Failed to acquire next surface texture.")
+                        }
+                    };
+                    let surface_texture_view = surface_texture.texture.create_view(
+                        &wgpu::TextureViewDescriptor {
+                            format: Some(surface_view_format),
+                            ..wgpu::TextureViewDescriptor::default()
+                        });
 
-            winit::event::Event::WindowEvent {
-                event: winit::event::WindowEvent::RedrawRequested,
-                ..
-            } => {
-                let surface_texture = match surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => {
-                        surface.configure(&device, &config);
-                        surface
-                            .get_current_texture()
-                            .expect("Failed to acquire next surface texture.")
-                    }
-                };
-                let surface_texture_view = surface_texture.texture.create_view(
-                    &wgpu::TextureViewDescriptor {
-                        format: Some(surface_view_format),
-                        ..wgpu::TextureViewDescriptor::default()
+                    assert!(!has_error_scope);
+                    device.push_error_scope(wgpu::ErrorFilter::Validation);
+                    has_error_scope = true;
+
+                    app.render(&RenderInfo {
+                        device: &device,
+                        queue: &queue,
+                        view: &surface_texture_view,
+                        time: start.elapsed().as_secs_f64(),
                     });
 
-                assert!(!has_error_scope);
-                device.push_error_scope(wgpu::ErrorFilter::Validation);
-                has_error_scope = true;
+                    surface_texture.present();
+                }
 
-                app.render(&RenderInfo {
-                    device: &device,
-                    queue: &queue,
-                    view: &surface_texture_view,
-                    time: start.elapsed().as_secs_f64(),
-                });
+                winit::event::Event::WindowEvent { event, .. } => {
+                    let event = process_window_event(event, &mut mouse_position);
+                    result = app.update(event);
+                }
 
-                surface_texture.present();
+                winit::event::Event::UserEvent(event) => {
+                    result = app.update(Event::Custom(event));
+                }
+
+                _ => {}
             }
-
-            winit::event::Event::WindowEvent { event, .. } => {
-                let event = process_window_event(event, &mut mouse_position);
-                result = app.update(event);
-            }
-
-            winit::event::Event::UserEvent(event) => {
-                result = app.update(Event::Custom(event));
-            }
-
-            _ => {}
         }
 
         match result {
@@ -216,7 +223,6 @@ fn start<AppType: App>(
             EventResult::Redraw => window.request_redraw(),
             EventResult::Exit => target.exit()
         }
-        
     }).unwrap();
 }
 
@@ -260,11 +266,14 @@ fn process_window_event<UserEvent>(event: winit::event::WindowEvent, mouse_posit
                 winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
                     Event::MouseWheel(mouse_position.clone(), l2)
                 }
-                winit::event::MouseScrollDelta::PixelDelta(pix) => {
-                    println!("PIXEL DELTA: {:?}", pix);
+                winit::event::MouseScrollDelta::PixelDelta(_pix) => {
                     Event::Unknown
                 }
             }
+        }
+        winit::event::WindowEvent::TouchpadMagnify { device_id: _device_id, delta, phase: _phase } => {
+            // Event::TouchpadMagnify(mouse_position.clone(), delta as f32)
+            Event::MouseWheel(mouse_position.clone(), -50.0 * delta as f32)
         }
         winit::event::WindowEvent::CloseRequested => {
             Event::WindowClose

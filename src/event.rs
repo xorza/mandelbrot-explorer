@@ -28,6 +28,7 @@ pub enum Event<UserEvent> {
     },
     MouseButton(MouseButtons, ElementState, Vec2u32),
     Custom(UserEvent),
+    TouchpadMagnify(Vec2u32, f32),
     Unknown,
 }
 
