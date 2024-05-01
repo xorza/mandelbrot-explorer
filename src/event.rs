@@ -1,4 +1,3 @@
-
 use crate::math::{Vec2i32, Vec2u32};
 
 #[derive(PartialEq, Debug, Clone)]
@@ -6,6 +5,8 @@ pub enum MouseButtons {
     Left,
     Right,
     Middle,
+    Back,
+    Forward,
     Other(u8),
 }
 
@@ -17,7 +18,6 @@ pub enum ElementState {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event<UserEvent> {
-    Init,
     Resized(Vec2u32),
     WindowClose,
     RedrawFinished,
@@ -55,8 +55,8 @@ impl From<winit::event::MouseButton> for MouseButtons {
             winit::event::MouseButton::Right => MouseButtons::Right,
             winit::event::MouseButton::Middle => MouseButtons::Middle,
             winit::event::MouseButton::Other(other) => MouseButtons::Other(other as u8),
-            winit::event::MouseButton::Back => MouseButtons::Other(255),
-            winit::event::MouseButton::Forward => MouseButtons::Other(254),
+            winit::event::MouseButton::Back => MouseButtons::Back,
+            winit::event::MouseButton::Forward => MouseButtons::Forward,
         }
     }
 }

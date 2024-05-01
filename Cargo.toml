@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 
 [dependencies]
-winit = "0.29"
+winit = "0.30"
 num-complex = "0.4"
 rayon = "1.10"
 bytemuck = { version = "1.15", features = ["derive"] }
@@ -20,5 +20,5 @@ image = "0.25"
 
 [profile.release]
 opt-level = 3         # Apply the highest level of optimizations.
-#lto = true           # makes release build crash for unknown reason
+lto = true           # makes release build crash for unknown reason
 codegen-units = 1     # Reduce parallel code generation which can improve optimizations

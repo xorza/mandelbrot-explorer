@@ -6,10 +6,10 @@ use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
-use crate::app_base::{App, RenderInfo};
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::{RectF64, Vec2f64, Vec2i32, Vec2u32};
+use crate::{RenderContext, WindowContext};
 
 enum ManipulateState {
     Idle,
@@ -18,7 +18,7 @@ enum ManipulateState {
 
 pub struct TiledFractalApp {
     window_size: Vec2u32,
-    event_loop: EventLoopProxy<UserEvent>,
+    event_loop_proxy: Arc<Mutex<EventLoopProxy<UserEvent>>>,
     runtime: Runtime,
 
     manipulate_state: ManipulateState,
@@ -38,19 +38,19 @@ pub enum UserEvent {
     },
 }
 
-impl App for TiledFractalApp {
-    type UserEventType = UserEvent;
-
-    fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        surface_config: &wgpu::SurfaceConfiguration,
+impl TiledFractalApp {
+    pub fn new(
+        window_state: &WindowContext,
         event_loop_proxy: EventLoopProxy<UserEvent>,
-    ) -> TiledFractalApp
-    {
-        let window_size = Vec2u32::new(surface_config.width, surface_config.height);
+    ) -> TiledFractalApp {
+        let window_size = Vec2u32::new(window_state.surface_config.width, window_state.surface_config.height);
 
-        let mandel_texture = MandelTexture::new(device, queue, surface_config, window_size);
+        let mandel_texture = MandelTexture::new(
+            &window_state.device,
+            &window_state.queue,
+            &window_state.surface_config,
+            window_size,
+        );
 
         let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
         let frame_rect = RectF64::from_center_size(
@@ -58,9 +58,9 @@ impl App for TiledFractalApp {
             aspect * 2.5,
         );
 
-        Self {
+        let mut result = Self {
             window_size,
-            event_loop: event_loop_proxy,
+            event_loop_proxy: Arc::new(Mutex::new(event_loop_proxy)),
             runtime: Runtime::new().unwrap(),
 
             manipulate_state: ManipulateState::Idle,
@@ -69,13 +69,30 @@ impl App for TiledFractalApp {
             aspect,
 
             mandel_texture,
-        }
+        };
+        result.update_fractal(result.frame_rect.center());
+        return result;
     }
 
-    fn update(&mut self, event: Event<UserEvent>) -> EventResult {
-        let result = match event {
+    pub fn update(&mut self, event: Event<UserEvent>) -> EventResult {
+        match event {
             Event::WindowClose => EventResult::Exit,
-            Event::Resized(_size) => EventResult::Redraw,
+            Event::Resized(window_size) => {
+                if self.window_size == window_size {
+                    return EventResult::Continue;
+                }
+
+                self.frame_rect = RectF64::from_center_size(
+                    self.frame_rect.center(),
+                    self.frame_rect.size * Vec2f64::from(window_size) / Vec2f64::from(self.window_size),
+                );
+                self.window_size = window_size;
+                self.mandel_texture.resize_window(window_size);
+
+                self.update_fractal(self.frame_rect.center());
+
+                EventResult::Redraw
+            }
 
             Event::MouseWheel(position, delta) => {
                 self.move_scale(position, Vec2i32::zeroed(), delta);
@@ -109,39 +126,15 @@ impl App for TiledFractalApp {
                 self.update_user_event(event)
             }
 
-            Event::Init => {
-                self.update_fractal(self.frame_rect.center());
-
-                EventResult::Continue
-            }
-
             _ => EventResult::Continue
-        };
-
-        result
+        }
     }
 
-    fn render(&mut self, render_info: &RenderInfo) {
+    pub fn render(&mut self, render_info: &RenderContext) {
         self.mandel_texture.render(render_info);
     }
 
-    fn resize(&mut self, _device: &wgpu::Device, _queue: &wgpu::Queue, window_size: Vec2u32) {
-        if self.window_size == window_size {
-            return;
-        }
 
-        self.frame_rect = RectF64::from_center_size(
-            self.frame_rect.center(),
-            self.frame_rect.size * Vec2f64::from(window_size) / Vec2f64::from(self.window_size),
-        );
-        self.window_size = window_size;
-        self.mandel_texture.resize_window(window_size);
-
-        self.update_fractal(self.frame_rect.center());
-    }
-}
-
-impl TiledFractalApp {
     fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
         let mouse_pos = Vec2i32::new(mouse_pos.x as i32, self.window_size.y as i32 - mouse_pos.y as i32);
         let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
@@ -182,8 +175,7 @@ impl TiledFractalApp {
     }
 
     fn update_fractal(&mut self, focus: Vec2f64) {
-        let event_loop_proxy =
-            Arc::new(Mutex::new(self.event_loop.clone()));
+        let event_loop_proxy = self.event_loop_proxy.clone();
 
         self.mandel_texture.update(
             self.frame_rect,
@@ -198,3 +190,4 @@ impl TiledFractalApp {
         );
     }
 }
+

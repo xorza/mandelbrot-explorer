@@ -9,10 +9,10 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
-use crate::app_base::RenderInfo;
 use crate::mandelbrot_simd::mandelbrot_simd;
 use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
 use crate::render_pods::{PushConst, ScreenRect};
+use crate::RenderContext;
 
 const TILE_SIZE: u32 = 64;
 
@@ -494,13 +494,13 @@ impl MandelTexture {
             });
     }
 
-    pub fn render(&mut self, render_info: &RenderInfo) {
+    pub fn render(&mut self, render_info: &RenderContext) {
         self.blit_textures(render_info);
         self.upload_tiles(render_info);
         self.surface_render(render_info);
     }
 
-    fn blit_textures(&mut self, render_info: &RenderInfo) {
+    fn blit_textures(&mut self, render_info: &RenderContext) {
         if !self.frame_changed {
             return;
         }
@@ -566,7 +566,7 @@ impl MandelTexture {
         self.fractal_rect_prev = self.fractal_rect;
     }
 
-    fn upload_tiles(&self, render_info: &RenderInfo) {
+    fn upload_tiles(&self, render_info: &RenderContext) {
         self.tiles
             .iter()
             .for_each(|tile| {
@@ -613,7 +613,7 @@ impl MandelTexture {
             });
     }
 
-    fn surface_render(&self, render_info: &RenderInfo) {
+    fn surface_render(&self, render_info: &RenderContext) {
         let tex_size = Vec2f32::all(self.texture_size as f32);
         let win_size = Vec2f32::from(self.window_size);
         let scale = tex_size / win_size;
