@@ -291,11 +291,13 @@ impl MandelTexture {
             vertex: wgpu::VertexState {
                 module: &blit_shader,
                 entry_point: "vs_main",
+                compilation_options: Default::default(),
                 buffers: &vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &blit_shader,
                 entry_point: "fs_main",
+                compilation_options: Default::default(),
                 targets: &[
                     Some(wgpu::TextureFormat::R8Unorm.into()),
                 ],
@@ -322,11 +324,13 @@ impl MandelTexture {
             vertex: wgpu::VertexState {
                 module: &screen_shader,
                 entry_point: "vs_main",
+                compilation_options: Default::default(),
                 buffers: &vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &screen_shader,
                 entry_point: "fs_main",
+                compilation_options: Default::default(),
                 targets: &[
                     Some(surface_config.view_formats[0].into()),
                 ],
@@ -515,11 +519,13 @@ impl MandelTexture {
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
+                                    store: wgpu::StoreOp::Store,
                                 },
                             }),
                         ],
                         depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
                     }
                 );
 
@@ -630,11 +636,13 @@ impl MandelTexture {
                                 resolve_target: None,
                                 ops: wgpu::Operations {
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
+                                    store: wgpu::StoreOp::Store,
                                 },
                             }),
                         ],
                         depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
                     }
                 );
 

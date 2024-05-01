@@ -1,3 +1,4 @@
+
 use crate::math::{Vec2i32, Vec2u32};
 
 #[derive(PartialEq, Debug, Clone)]
@@ -53,6 +54,8 @@ impl From<winit::event::MouseButton> for MouseButtons {
             winit::event::MouseButton::Right => MouseButtons::Right,
             winit::event::MouseButton::Middle => MouseButtons::Middle,
             winit::event::MouseButton::Other(other) => MouseButtons::Other(other as u8),
+            winit::event::MouseButton::Back => MouseButtons::Other(255),
+            winit::event::MouseButton::Forward => MouseButtons::Other(254),
         }
     }
 }

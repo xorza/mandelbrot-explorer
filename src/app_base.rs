@@ -1,10 +1,11 @@
 use std::default::Default;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bytemuck::Zeroable;
 use pollster::FutureExt;
 use wgpu::Limits;
-use winit::event_loop::{ControlFlow, EventLoop, EventLoopBuilder, EventLoopProxy};
+use winit::event_loop::{ EventLoop, EventLoopBuilder, EventLoopProxy};
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2i32, Vec2u32};
@@ -30,11 +31,11 @@ pub trait App: 'static + Sized {
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: Vec2u32);
 }
 
-struct Setup<UserEventType: 'static> {
-    window: winit::window::Window,
+struct Setup<'a, UserEventType: 'static> {
+    window: Arc<winit::window::Window>,
     event_loop: EventLoop<UserEventType>,
     size: winit::dpi::PhysicalSize<u32>,
-    surface: wgpu::Surface,
+    surface: wgpu::Surface<'a>,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -43,22 +44,25 @@ struct Setup<UserEventType: 'static> {
 fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
     let event_loop: EventLoop<UserEventType> =
         EventLoopBuilder::<UserEventType>::with_user_event()
-            .build();
+            .build()
+            .unwrap();
     let window =
         winit::window::WindowBuilder::new()
             .with_title(title)
             // .with_inner_size(LogicalSize::new(1024, 512))
             .build(&event_loop)
             .expect("Failed to create window.");
+    let window = Arc::new(window);
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
+        flags: Default::default(),
         dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+        gles_minor_version: Default::default(),
     });
     let size = window.inner_size();
-    let surface = unsafe {
-        instance.create_surface(&window).unwrap()
-    };
+    let surface =
+        instance.create_surface(Arc::clone(&window)).unwrap();
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -79,8 +83,8 @@ fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
-                features: wgpu::Features::PUSH_CONSTANTS,
-                limits,
+                required_features: wgpu::Features::PUSH_CONSTANTS,
+                required_limits: limits,
             },
             None,
         )
@@ -88,7 +92,7 @@ fn setup<UserEventType: 'static>(title: &str) -> Setup<UserEventType> {
         .expect("Unable to find a suitable GPU adapter.");
 
     Setup {
-        window,
+        window: window.clone(),
         event_loop,
         size,
         surface,
@@ -129,33 +133,28 @@ fn start<AppType: App>(
         EventResult::Exit => return,
     }
 
-    event_loop.run(move |event, _target, control_flow| {
-        if matches!(event, winit::event::Event::MainEventsCleared) {
-            *control_flow = ControlFlow::Wait;
+    event_loop.run(move |event, target| {
+        let mut result: EventResult = EventResult::Continue;
+
+        if matches!(event, winit::event::Event::AboutToWait) {
+            if has_error_scope {
+                if let Some(error) = device.pop_error_scope().block_on() {
+                    panic!("Device error: {:?}", error);
+                }
+                has_error_scope = false;
+            }
+
+            result = app.update(Event::RedrawFinished);
             return;
         }
 
-        let mut result: EventResult = EventResult::Continue;
 
         match event {
-            winit::event::Event::RedrawEventsCleared => {
-                if has_error_scope {
-                    if let Some(error) = device.pop_error_scope().block_on() {
-                        panic!("Device error: {:?}", error);
-                    }
-                    has_error_scope = false;
-                }
-
-                result = app.update(Event::RedrawFinished);
-            }
             winit::event::Event::WindowEvent {
                 event:
-                winit::event::WindowEvent::Resized(size)
-                | winit::event::WindowEvent::ScaleFactorChanged {
-                    new_inner_size: &mut size,
-                    ..
-                },
-                ..
+                winit::event::WindowEvent::Resized(_)
+                | winit::event::WindowEvent::ScaleFactorChanged { .. }
+                , ..
             } => {
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
@@ -167,7 +166,10 @@ fn start<AppType: App>(
                 result = app.update(Event::Resized(window_size));
             }
 
-            winit::event::Event::RedrawRequested(_) => {
+            winit::event::Event::WindowEvent {
+                event: winit::event::WindowEvent::RedrawRequested,
+                ..
+            } => {
                 let surface_texture = match surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -212,9 +214,10 @@ fn start<AppType: App>(
         match result {
             EventResult::Continue => {}
             EventResult::Redraw => window.request_redraw(),
-            EventResult::Exit => *control_flow = ControlFlow::Exit
+            EventResult::Exit => target.exit()
         }
-    });
+        
+    }).unwrap();
 }
 
 fn process_window_event<UserEvent>(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event<UserEvent> {

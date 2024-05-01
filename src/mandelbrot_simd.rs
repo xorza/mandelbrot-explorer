@@ -1,5 +1,5 @@
 #![allow(non_camel_case_types)]
-use std::simd::SimdPartialOrd;
+use std::simd::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::time::Instant;
