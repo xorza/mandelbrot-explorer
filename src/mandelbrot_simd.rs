@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+
 use std::simd::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
@@ -13,9 +14,9 @@ use crate::math::{RectF64, RectU32, Vec2f64};
 const MULTISAMPLE_THRESHOLD: u8 = 64;
 const SIMD_LANE_COUNT: usize = 8;
 
-type f64simd = std::simd::Simd<f64, SIMD_LANE_COUNT>;
-type i64simd = std::simd::Simd<i64, SIMD_LANE_COUNT>;
-type mask64simd = std::simd::Mask<i64, SIMD_LANE_COUNT>;
+type f64simd = Simd<f64, SIMD_LANE_COUNT>;
+type i64simd = Simd<i64, SIMD_LANE_COUNT>;
+type mask64simd = Mask<i64, SIMD_LANE_COUNT>;
 type CountSimd = [u8; SIMD_LANE_COUNT];
 
 

@@ -149,7 +149,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEventType) {
-        if self.fractal_app.is_none() {
+        if self.window.is_none() {
             return;
         }
         
@@ -158,7 +158,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: winit::event::WindowEvent) {
-        if self.fractal_app.is_none() {
+        if self.window.is_none() {
             return;
         }
         
@@ -238,7 +238,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.fractal_app.is_none() {
+        if self.window.is_none() {
             return;
         }
         
