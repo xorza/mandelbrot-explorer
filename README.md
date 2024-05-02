@@ -11,7 +11,7 @@ Preview drag and zoom done on GPU.
 Uses nightly toolchain for SIMD support.
 
 Runs pretty smooth on my Macbook Air M2 2022.
-Single-threaded 2048x2048 render with 1024 max iterations takes 540ms.
+Single-threaded 2048x2048 render with 1024 max iterations takes 430ms.
 
 ![Screen Recording 2023-08-18 at 5.35.27 PM.gif](doc/Screen%20Recording%202023-08-18%20at%205.35.27%20PM.gif)
 
