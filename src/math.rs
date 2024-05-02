@@ -74,7 +74,6 @@ pub struct RectF64 {
     pub size: Vec2f64,
 }
 
-
 impl Vec2f32 {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
@@ -105,7 +104,12 @@ impl Vec4f32 {
         Self { x, y, z, w }
     }
     pub fn all(v: f32) -> Self {
-        Self { x: v, y: v, z: v, w: v }
+        Self {
+            x: v,
+            y: v,
+            z: v,
+            w: v,
+        }
     }
 }
 
@@ -114,7 +118,12 @@ impl Vec4u32 {
         Self { x, y, z, w }
     }
     pub fn all(v: u32) -> Self {
-        Self { x: v, y: v, z: v, w: v }
+        Self {
+            x: v,
+            y: v,
+            z: v,
+            w: v,
+        }
     }
 }
 
@@ -141,7 +150,6 @@ impl Vec2i32 {
         self.x * self.x + self.y * self.y
     }
 }
-
 
 impl Add for Vec2u32 {
     type Output = Self;
@@ -307,7 +315,6 @@ impl From<Vec2f64> for Vec2i32 {
     }
 }
 
-
 impl AddAssign for Vec2f64 {
     fn add_assign(&mut self, rhs: Self) {
         self.x += rhs.x;
@@ -447,7 +454,6 @@ impl From<Vec2f32> for Vec2f64 {
     }
 }
 
-
 impl Mul<Vec2f32> for f32 {
     type Output = Vec2f32;
 
@@ -543,7 +549,6 @@ impl From<Vec2f64> for Vec2f32 {
     }
 }
 
-
 impl Mat4x4f32 {
     pub fn as_bytes(&self) -> &[u8] {
         bytemuck::bytes_of(self)
@@ -573,18 +578,14 @@ impl Default for Mat4x4f32 {
             0.0, 1.0, 0.0, 0.0, // 2nd column
             0.0, 0.0, 1.0, 0.0, // 3rd column
             0.0, 0.0, 0.0, 1.0, // 4th column
-            // @formatter:on
+                 // @formatter:on
         ])
     }
 }
 
-
 impl RectU32 {
     pub fn from_pos_size(pos: Vec2u32, size: Vec2u32) -> Self {
-        Self {
-            pos,
-            size,
-        }
+        Self { pos, size }
     }
     pub fn intersects(&self, other: &Self) -> bool {
         self.pos.x < other.pos.x + other.size.x
@@ -600,13 +601,9 @@ impl RectU32 {
     }
 }
 
-
 impl RectI32 {
     pub fn from_pos_size(pos: Vec2i32, size: Vec2i32) -> Self {
-        Self {
-            pos,
-            size,
-        }
+        Self { pos, size }
     }
     pub fn intersects(&self, other: &Self) -> bool {
         self.pos.x < other.pos.x + other.size.x
@@ -627,13 +624,9 @@ impl From<RectU32> for RectI32 {
     }
 }
 
-
 impl RectF64 {
     pub fn from_pos_size(pos: Vec2f64, size: Vec2f64) -> Self {
-        Self {
-            pos,
-            size,
-        }
+        Self { pos, size }
     }
     pub fn from_center_size(center: Vec2f64, size: Vec2f64) -> Self {
         Self {
@@ -660,7 +653,6 @@ impl RectF64 {
         self.pos + self.size
     }
 }
-
 
 impl std::fmt::Debug for RectF64 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

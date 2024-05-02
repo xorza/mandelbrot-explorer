@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::mem::swap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicU32;
+use std::sync::{Arc, Mutex};
 
 use bytemuck::Zeroable;
 use tokio::runtime::Runtime;
@@ -18,12 +18,8 @@ const TILE_SIZE: u32 = 64;
 
 pub enum TileState {
     Idle,
-    Computing {
-        task_handle: JoinHandle<()>,
-    },
-    WaitForUpload {
-        buffer: Vec<u8>,
-    },
+    Computing { task_handle: JoinHandle<()> },
+    WaitForUpload { buffer: Vec<u8> },
     Ready,
 }
 
@@ -65,7 +61,6 @@ pub struct MandelTexture {
     pub sampler: wgpu::Sampler,
 }
 
-
 impl MandelTexture {
     pub fn new(
         device: &wgpu::Device,
@@ -91,7 +86,9 @@ impl MandelTexture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
             label: None,
         });
@@ -103,7 +100,9 @@ impl MandelTexture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
             label: None,
         });
@@ -200,49 +199,45 @@ impl MandelTexture {
             },
         );
 
-        let bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D1,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D1,
-                        },
-                        count: None,
-                    },
-                ],
-                label: None,
-            });
-        let pipeline_layout = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[
-                    wgpu::PushConstantRange {
-                        stages: wgpu::ShaderStages::VERTEX,
-                        range: 0..PushConst::size_in_bytes(),
-                    },
-                ],
-                label: None,
-            });
+                    count: None,
+                },
+            ],
+            label: None,
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[wgpu::PushConstantRange {
+                stages: wgpu::ShaderStages::VERTEX,
+                range: 0..PushConst::size_in_bytes(),
+            }],
+            label: None,
+        });
 
         let bind_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
@@ -298,9 +293,7 @@ impl MandelTexture {
                 module: &blit_shader,
                 entry_point: "fs_main",
                 compilation_options: Default::default(),
-                targets: &[
-                    Some(wgpu::TextureFormat::R8Unorm.into()),
-                ],
+                targets: &[Some(wgpu::TextureFormat::R8Unorm.into())],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
@@ -331,9 +324,7 @@ impl MandelTexture {
                 module: &screen_shader,
                 entry_point: "fs_main",
                 compilation_options: Default::default(),
-                targets: &[
-                    Some(surface_config.view_formats[0].into()),
-                ],
+                targets: &[Some(surface_config.view_formats[0].into())],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
@@ -379,13 +370,9 @@ impl MandelTexture {
         }
     }
 
-    pub fn update<F>(
-        &mut self,
-        frame_rect: RectF64,
-        focus: Vec2f64,
-        tile_ready_callback: F,
-    )
-    where F: Fn(usize) + Clone + Send + Sync + 'static
+    pub fn update<F>(&mut self, frame_rect: RectF64, focus: Vec2f64, tile_ready_callback: F)
+    where
+        F: Fn(usize) + Clone + Send + Sync + 'static,
     {
         self.frame_rect = frame_rect;
         let scale_changed = frame_rect.size.length_squared() != self.fractal_scale;
@@ -397,25 +384,22 @@ impl MandelTexture {
             self.fractal_scale = frame_rect.size.length_squared();
             self.fractal_rect = RectF64::from_center_size(
                 frame_rect.center(),
-                Vec2f64::all(frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64),
+                Vec2f64::all(
+                    frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64,
+                ),
             );
             // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
         }
 
         let fractal_rect = self.fractal_rect;
-        let max_iterations = 300 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32;
+        let max_iterations =
+            300 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32;
         // println!("max_iterations: {}", max_iterations);
 
         self.tiles.sort_unstable_by(|a, b| {
-            let a_center = a.fractal_rect(
-                self.texture_size,
-                fractal_rect,
-            ).center();
-            let b_center = b.fractal_rect(
-                self.texture_size,
-                fractal_rect,
-            ).center();
+            let a_center = a.fractal_rect(self.texture_size, fractal_rect).center();
+            let b_center = b.fractal_rect(self.texture_size, fractal_rect).center();
 
             let a_dist = (a_center - focus).length_squared();
             let b_dist = (b_center - focus).length_squared();
@@ -423,75 +407,67 @@ impl MandelTexture {
             a_dist.partial_cmp(&b_dist).unwrap()
         });
 
-        self.tiles
-            .iter()
-            .for_each(|tile| {
-                let mut tile_state_mutex = tile.state.lock().unwrap();
-                let tile_state = &mut *tile_state_mutex;
+        self.tiles.iter().for_each(|tile| {
+            let mut tile_state_mutex = tile.state.lock().unwrap();
+            let tile_state = &mut *tile_state_mutex;
 
-                if frame_changed {
-                    tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if let TileState::Computing { task_handle } = tile_state {
-                        task_handle.abort();
-                    }
+            if frame_changed {
+                tile.cancel_token
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let TileState::Computing { task_handle } = tile_state {
+                    task_handle.abort();
+                }
+                *tile_state = TileState::Idle;
+            }
+
+            let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
+            if !frame_rect.intersects(&tile_rect) {
+                if let TileState::Computing { task_handle } = tile_state {
+                    tile.cancel_token
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    task_handle.abort();
                     *tile_state = TileState::Idle;
                 }
+                return;
+            }
 
-                let tile_rect = tile.fractal_rect(
-                    self.texture_size,
-                    self.fractal_rect,
-                );
-                if !frame_rect.intersects(&tile_rect) {
-                    if let TileState::Computing { task_handle } = tile_state {
-                        tile.cancel_token.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        task_handle.abort();
-                        *tile_state = TileState::Idle;
-                    }
-                    return;
+            if !matches!(tile_state, TileState::Idle) {
+                return;
+            }
+
+            let img_size = self.texture_size;
+            let tile_rect = tile.tex_rect;
+            let tile_index = tile.index;
+
+            let callback = tile_ready_callback.clone();
+            let cancel_token = tile.cancel_token.clone();
+            let tile_state_clone = tile.state.clone();
+            let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
+            let semaphore = self.semaphore.clone();
+
+            let task_handle = self.runtime.spawn(async move {
+                let _ = semaphore.acquire().await.unwrap();
+                let buf = mandelbrot_simd(
+                    img_size,
+                    tile_rect,
+                    -fractal_rect.center(),
+                    1.0 / fractal_rect.size.y,
+                    max_iterations,
+                    cancel_token,
+                    cancel_token_value,
+                )
+                .await
+                .ok();
+
+                if let Some(buf) = buf {
+                    let mut tile_state = tile_state_clone.lock().unwrap();
+                    *tile_state = TileState::WaitForUpload { buffer: buf };
+                    (callback)(tile_index);
                 }
-
-                if !matches!(tile_state, TileState::Idle) {
-                    return;
-                }
-
-                let img_size = self.texture_size;
-                let tile_rect = tile.tex_rect;
-                let tile_index = tile.index;
-
-                let callback = tile_ready_callback.clone();
-                let cancel_token = tile.cancel_token.clone();
-                let tile_state_clone = tile.state.clone();
-                let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
-                let semaphore = self.semaphore.clone();
-
-                let task_handle = self.runtime.spawn(async move {
-                    let _ = semaphore.acquire().await.unwrap();
-                    let buf = mandelbrot_simd(
-                        img_size,
-                        tile_rect,
-                        -fractal_rect.center(),
-                        1.0 / fractal_rect.size.y,
-                        max_iterations,
-                        cancel_token,
-                        cancel_token_value,
-                    )
-                        .await
-                        .ok();
-
-
-                    if let Some(buf) = buf {
-                        let mut tile_state = tile_state_clone.lock().unwrap();
-                        *tile_state = TileState::WaitForUpload {
-                            buffer: buf,
-                        };
-                        (callback)(tile_index);
-                    }
-                });
-
-                *tile_state = TileState::Computing {
-                    task_handle,
-                };
             });
+
+            *tile_state = TileState::Computing { task_handle };
+        });
     }
 
     pub fn render(&mut self, render_info: &RenderContext) {
@@ -505,37 +481,31 @@ impl MandelTexture {
             return;
         }
 
-        let mut command_encoder = render_info.device
+        let mut command_encoder = render_info
+            .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         {
-            let mut render_pass = command_encoder
-                .begin_render_pass(
-                    &wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: &self.texture2_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            }),
-                        ],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    }
-                );
+            let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.texture2_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
             render_pass.set_pipeline(&self.blit_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
-            let offset =
-                (self.fractal_rect_prev.center() - self.fractal_rect.center())
-                    / self.fractal_rect_prev.size
-                ;
+            let offset = (self.fractal_rect_prev.center() - self.fractal_rect.center())
+                / self.fractal_rect_prev.size;
             let offset = 2.0 * Vec2f64::new(offset.x, -offset.y);
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
 
@@ -543,14 +513,9 @@ impl MandelTexture {
             let mut pc = PushConst::new();
             pc.proj_mat
                 .scale(Vec2f32::from(scale))
-                .translate2d(Vec2f32::from(offset))
-            ;
+                .translate2d(Vec2f32::from(offset));
 
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                pc.as_bytes(),
-            );
+            render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
 
             render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
@@ -567,50 +532,48 @@ impl MandelTexture {
     }
 
     fn upload_tiles(&self, render_info: &RenderContext) {
-        self.tiles
-            .iter()
-            .for_each(|tile| {
-                let mut buff: Option<Vec<u8>> = None;
+        self.tiles.iter().for_each(|tile| {
+            let mut buff: Option<Vec<u8>> = None;
 
-                {
-                    let mut tile_state = tile.state.lock().unwrap();
-                    if let TileState::WaitForUpload { buffer } = &mut *tile_state {
-                        let mut new_buff: Vec<u8> = Vec::new();
-                        swap(&mut new_buff, buffer);
-                        buff = Some(new_buff);
-                    }
-                    if buff.is_some() {
-                        *tile_state = TileState::Ready;
-                    } else {
-                        return;
-                    }
+            {
+                let mut tile_state = tile.state.lock().unwrap();
+                if let TileState::WaitForUpload { buffer } = &mut *tile_state {
+                    let mut new_buff: Vec<u8> = Vec::new();
+                    swap(&mut new_buff, buffer);
+                    buff = Some(new_buff);
                 }
+                if buff.is_some() {
+                    *tile_state = TileState::Ready;
+                } else {
+                    return;
+                }
+            }
 
-                let buff = buff.unwrap();
-                render_info.queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &self.texture1,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d {
-                            x: tile.tex_rect.pos.x,
-                            y: tile.tex_rect.pos.y,
-                            z: 0,
-                        },
-                        aspect: wgpu::TextureAspect::All,
+            let buff = buff.unwrap();
+            render_info.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.texture1,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: tile.tex_rect.pos.x,
+                        y: tile.tex_rect.pos.y,
+                        z: 0,
                     },
-                    &buff,
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: Some(tile.tex_rect.size.x),
-                        rows_per_image: Some(tile.tex_rect.size.y),
-                    },
-                    wgpu::Extent3d {
-                        width: tile.tex_rect.size.x,
-                        height: tile.tex_rect.size.y,
-                        depth_or_array_layers: 1,
-                    },
-                );
-            });
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &buff,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(tile.tex_rect.size.x),
+                    rows_per_image: Some(tile.tex_rect.size.y),
+                },
+                wgpu::Extent3d {
+                    width: tile.tex_rect.size.x,
+                    height: tile.tex_rect.size.y,
+                    depth_or_array_layers: 1,
+                },
+            );
+        });
     }
 
     fn surface_render(&self, render_info: &RenderContext) {
@@ -618,47 +581,36 @@ impl MandelTexture {
         let win_size = Vec2f32::from(self.window_size);
         let scale = tex_size / win_size;
         let offset =
-            2.0 * (self.fractal_rect.center() - self.frame_rect.center())
-                / self.frame_rect.size;
+            2.0 * (self.fractal_rect.center() - self.frame_rect.center()) / self.frame_rect.size;
 
         // println!( "render offset: {:?}, scale: {:?}", offset, scale);
 
-        let mut command_encoder = render_info.device
+        let mut command_encoder = render_info
+            .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut render_pass = command_encoder
-                .begin_render_pass(
-                    &wgpu::RenderPassDescriptor {
-                        label: None,
-                        color_attachments: &[
-                            Some(wgpu::RenderPassColorAttachment {
-                                view: render_info.view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            }),
-                        ],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    }
-                );
+            let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: render_info.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
             render_pass.set_pipeline(&self.screen_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
             let mut pc = PushConst::new();
-            pc.proj_mat
-                .translate2d(Vec2f32::from(offset))
-                .scale(scale);
+            pc.proj_mat.translate2d(Vec2f32::from(offset)).scale(scale);
 
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                pc.as_bytes(),
-            );
+            render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
 
             render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
@@ -678,12 +630,9 @@ impl Tile {
         let abs_tile_pos = Vec2f64::from(self.tex_rect.pos);
         let abs_tile_size = Vec2f64::from(self.tex_rect.size);
 
-        let tile_size =
-            fractal_rect.size * abs_tile_size / abs_frame_size;
-        let tile_pos =
-            fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
+        let tile_size = fractal_rect.size * abs_tile_size / abs_frame_size;
+        let tile_pos = fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
 
         RectF64::from_pos_size(tile_pos, tile_size)
     }
 }
-

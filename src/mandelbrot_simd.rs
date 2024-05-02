@@ -19,7 +19,6 @@ type i64simd = Simd<i64, SIMD_LANE_COUNT>;
 type mask64simd = Mask<i64, SIMD_LANE_COUNT>;
 type CountSimd = [u8; SIMD_LANE_COUNT];
 
-
 //noinspection RsConstantConditionIf
 pub async fn mandelbrot_simd(
     image_size: u32,
@@ -29,8 +28,7 @@ pub async fn mandelbrot_simd(
     max_iterations: u32,
     cancel_token: Arc<AtomicU32>,
     cancel_token_value: u32,
-) -> anyhow::Result<Vec<u8>>
-{
+) -> anyhow::Result<Vec<u8>> {
     let now = Instant::now();
 
     let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
@@ -57,24 +55,27 @@ pub async fn mandelbrot_simd(
         ]
     };
 
-    { // main buffer
-        let x_init = (0..SIMD_LANE_COUNT)
-            .map(|i| i as f64)
-            .collect::<Vec<f64>>();
+    {
+        // main buffer
+        let x_init = (0..SIMD_LANE_COUNT).map(|i| i as f64).collect::<Vec<f64>>();
 
         for y in 0..tile_rect.size.y {
             for x in 0..tile_rect.size.x / SIMD_LANE_COUNT as u32 {
                 if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
-                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value {
+                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value
+                    {
                         return Err(anyhow!("Cancelled"));
                     }
                 }
 
-                let cx = f64simd::from_slice(x_init.as_slice()) + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
+                let cx = f64simd::from_slice(x_init.as_slice())
+                    + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
                 let cx = cx * f64simd::splat(buffer_frame.size.x / tile_rect.size.x as f64);
                 let cx = cx + f64simd::splat(buffer_frame.pos.x);
 
-                let cy = f64simd::splat(buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tile_rect.size.y as f64));
+                let cy = f64simd::splat(
+                    buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tile_rect.size.y as f64),
+                );
 
                 let values_simd = pixel(max_iterations, cx, cy);
 
@@ -84,10 +85,10 @@ pub async fn mandelbrot_simd(
         }
     }
 
-
     let mut multisampled_pixels_count: usize = 0;
 
-    { // multisample
+    {
+        // multisample
         let mut cx_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
         let mut cy_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
         let mut loaded_indexes: Vec<usize> = Vec::with_capacity(SIMD_LANE_COUNT);
@@ -102,23 +103,25 @@ pub async fn mandelbrot_simd(
                     let value = buffer[index];
 
                     (x != tile_rect.size.x - 1
-                        && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize]) > MULTISAMPLE_THRESHOLD)
-                        ||
-                        (x != 0
-                            && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize]) > MULTISAMPLE_THRESHOLD)
-                        ||
-                        (y != tile_rect.size.y - 1
-                            && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD)
-                        ||
-                        (y != 0
-                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize]) > MULTISAMPLE_THRESHOLD)
+                        && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize])
+                        > MULTISAMPLE_THRESHOLD)
+                        || (x != 0
+                        && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize])
+                        > MULTISAMPLE_THRESHOLD)
+                        || (y != tile_rect.size.y - 1
+                        && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize])
+                        > MULTISAMPLE_THRESHOLD)
+                        || (y != 0
+                        && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize])
+                        > MULTISAMPLE_THRESHOLD)
                 };
 
                 if should_multisample {
                     multisampled_pixels_count += 1;
 
                     let xy = buffer_frame.pos
-                        + buffer_frame.size * Vec2f64::new(x as f64, y as f64) / Vec2f64::from(tile_rect.size);
+                        + buffer_frame.size * Vec2f64::new(x as f64, y as f64)
+                        / Vec2f64::from(tile_rect.size);
 
                     for sample_offset in &sample_offsets[1..3] {
                         let xy = xy + *sample_offset;
@@ -171,7 +174,6 @@ pub async fn mandelbrot_simd(
     Ok(buffer)
 }
 
-
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut zx = f64simd::splat(0.0);
     let mut zy = f64simd::splat(0.0);
@@ -183,12 +185,7 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let i64_1 = i64simd::splat(1);
 
     for _ in 0..max_iterations {
-        (zx, zy) = {
-            (
-                zx * zx - zy * zy + cx,
-                zx * zy + zx * zy + cy
-            )
-        };
+        (zx, zy) = (zx * zx - zy * zy + cx, zx * zy + zx * zy + cy);
 
         escaped |= (zx * zx + zy * zy).simd_ge(f64_4_0);
 
@@ -196,23 +193,17 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
             break;
         }
 
-        cnt += escaped.select(
-            i64_0,
-            i64_1,
-        );
+        cnt += escaped.select(i64_0, i64_1);
     }
 
-    cnt
-        .as_array()
-        .map(|v| {
-            if v == max_iterations as i64 {
-                0
-            } else {
-                (v % 256) as u8
-            }
-        })
+    cnt.as_array().map(|v| {
+        if v == max_iterations as i64 {
+            0
+        } else {
+            (v % 256) as u8
+        }
+    })
 }
-
 
 fn is_in_main_cardioid(xy: Vec2f64) -> bool {
     let q = (xy.x - 0.25).powi(2) + xy.y.powi(2);
@@ -225,7 +216,6 @@ fn is_in_main_circle(xy: Vec2f64) -> bool {
     result
 }
 
-
 #[cfg(test)]
 mod test {
     use pollster::FutureExt;
@@ -237,16 +227,14 @@ mod test {
 
     #[test]
     fn draw_mandelbrot() {
-        use std::sync::Arc;
         use std::sync::atomic::AtomicU32;
+        use std::sync::Arc;
 
         use crate::math::{RectU32, Vec2f64};
 
         let image_size = 2048;
-        let tile_rect = RectU32::from_pos_size(
-            Vec2u32::new(0, 0),
-            Vec2u32::new(image_size, image_size),
-        );
+        let tile_rect =
+            RectU32::from_pos_size(Vec2u32::new(0, 0), Vec2u32::new(image_size, image_size));
         let fractal_offset = Vec2f64::new(-0.080669055533625203, -0.4499300190992746);
         let fractal_scale = 75.475169471081102;
         let max_iterations = 1024;
@@ -301,7 +289,6 @@ mod test {
                 .unwrap()
         };
 
-
         if is_debug_build() {
             let elapsed = now.elapsed().as_millis();
             println!("DEBUG Avg elapsed: {}ms", elapsed);
@@ -322,4 +309,3 @@ mod test {
         image.save("test_output/mandelbrot.png").unwrap();
     }
 }
-

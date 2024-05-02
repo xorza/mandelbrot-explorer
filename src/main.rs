@@ -16,13 +16,13 @@ use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::math::{Vec2i32, Vec2u32};
 use crate::tiled_fractal_app::UserEvent;
 
+mod env;
 mod event;
+mod mandel_texture;
+mod mandelbrot_simd;
 mod math;
 mod render_pods;
-mod mandel_texture;
 mod tiled_fractal_app;
-mod env;
-mod mandelbrot_simd;
 
 type UserEventType = UserEvent;
 
@@ -34,7 +34,6 @@ struct WindowContext<'window> {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
-
 }
 
 struct AppState<'window> {
@@ -81,15 +80,18 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window_attr = winit::window::Window::default_attributes()
-            .with_title("Mandelbrot explorer");
+        let window_attr =
+            winit::window::Window::default_attributes().with_title("Mandelbrot explorer");
         let window = event_loop.create_window(window_attr).unwrap();
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: Default::default(),
-            dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+            dx12_shader_compiler: wgpu::Dx12Compiler::Dxc {
+                dxil_path: None,
+                dxc_path: None,
+            },
             gles_minor_version: Default::default(),
         });
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -107,7 +109,8 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         let limits = Limits {
             max_push_constant_size: 1024,
             ..Default::default()
-        }.using_resolution(adapter.limits());
+        }
+        .using_resolution(adapter.limits());
 
         let (device, queue) = adapter
             .request_device(
@@ -128,7 +131,6 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         let surface_view_format = surface_config.format.add_srgb_suffix();
         surface_config.view_formats.push(surface_view_format);
         surface.configure(&device, &surface_config);
-
 
         self.window = Some(WindowContext {
             window: window.clone(),
@@ -152,16 +154,25 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         if self.window.is_none() {
             return;
         }
-        
-        let result = self.fractal_app.as_mut().unwrap().update(Event::Custom(event));
+
+        let result = self
+            .fractal_app
+            .as_mut()
+            .unwrap()
+            .update(Event::Custom(event));
         self.process_event_result(event_loop, result);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: winit::event::WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: winit::event::WindowEvent,
+    ) {
         if self.window.is_none() {
             return;
         }
-        
+
         if self.mouse_position.is_none() {
             match event {
                 winit::event::WindowEvent::CursorMoved { position, .. } => {
@@ -172,68 +183,88 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             }
         }
 
-        let result: EventResult =
-            match event {
-                winit::event::WindowEvent::Resized(_) | winit::event::WindowEvent::ScaleFactorChanged { .. } => {
-                    let window_state = self.window.as_mut().unwrap();
-                    let window_size = window_state.window.inner_size();
+        let result: EventResult = match event {
+            winit::event::WindowEvent::Resized(_)
+            | winit::event::WindowEvent::ScaleFactorChanged { .. } => {
+                let window_state = self.window.as_mut().unwrap();
+                let window_size = window_state.window.inner_size();
 
-                    let window_size = Vec2u32::new(window_size.width.max(1), window_size.height.max(1));
-                    window_state.surface_config.width = window_size.x;
-                    window_state.surface_config.height = window_size.y;
-                    window_state.surface.configure(&window_state.device, &window_state.surface_config);
+                let window_size = Vec2u32::new(window_size.width.max(1), window_size.height.max(1));
+                window_state.surface_config.width = window_size.x;
+                window_state.surface_config.height = window_size.y;
+                window_state
+                    .surface
+                    .configure(&window_state.device, &window_state.surface_config);
 
-                    self.fractal_app.as_mut().unwrap().update(Event::Resized(window_size))
-                }
-                winit::event::WindowEvent::RedrawRequested => {
-                    let window_state = self.window.as_mut().unwrap();
+                self.fractal_app
+                    .as_mut()
+                    .unwrap()
+                    .update(Event::Resized(window_size))
+            }
+            winit::event::WindowEvent::RedrawRequested => {
+                let window_state = self.window.as_mut().unwrap();
 
-                    self.is_redrawing = true;
+                self.is_redrawing = true;
 
-                    let surface_texture = match window_state.surface.get_current_texture() {
-                        Ok(frame) => frame,
-                        Err(_) => {
-                            window_state.surface.configure(&window_state.device, &window_state.surface_config);
-                            window_state.surface
-                                .get_current_texture()
-                                .expect("Failed to acquire next surface texture.")
-                        }
-                    };
-                    let surface_texture_view = surface_texture.texture.create_view(
-                        &wgpu::TextureViewDescriptor {
+                let surface_texture = match window_state.surface.get_current_texture() {
+                    Ok(frame) => frame,
+                    Err(_) => {
+                        window_state
+                            .surface
+                            .configure(&window_state.device, &window_state.surface_config);
+                        window_state
+                            .surface
+                            .get_current_texture()
+                            .expect("Failed to acquire next surface texture.")
+                    }
+                };
+                let surface_texture_view =
+                    surface_texture
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor {
                             format: Some(window_state.surface_config.format),
                             ..wgpu::TextureViewDescriptor::default()
                         });
 
-                    assert!(!self.has_render_error_scope);
-                    window_state.device.push_error_scope(wgpu::ErrorFilter::Validation);
-                    self.has_render_error_scope = true;
+                assert!(!self.has_render_error_scope);
+                window_state
+                    .device
+                    .push_error_scope(wgpu::ErrorFilter::Validation);
+                self.has_render_error_scope = true;
 
-                    self.fractal_app.as_mut().unwrap().render(&RenderContext {
-                        device: &window_state.device,
-                        queue: &window_state.queue,
-                        view: &surface_texture_view,
-                        time: self.start.elapsed().as_secs_f64(),
-                    });
+                self.fractal_app.as_mut().unwrap().render(&RenderContext {
+                    device: &window_state.device,
+                    queue: &window_state.queue,
+                    view: &surface_texture_view,
+                    time: self.start.elapsed().as_secs_f64(),
+                });
 
-                    surface_texture.present();
+                surface_texture.present();
 
-                    EventResult::Continue
-                }
+                EventResult::Continue
+            }
 
-                event => {
-                    let mut empty_mouse_position = Vec2u32::zeroed();
-                    let mouse_position = self.mouse_position.as_mut().unwrap_or(&mut empty_mouse_position);
-                    let event = process_window_event(event, mouse_position);
+            event => {
+                let mut empty_mouse_position = Vec2u32::zeroed();
+                let mouse_position = self
+                    .mouse_position
+                    .as_mut()
+                    .unwrap_or(&mut empty_mouse_position);
+                let event = process_window_event(event, mouse_position);
 
-                    self.fractal_app.as_mut().unwrap().update(event)
-                }
-            };
+                self.fractal_app.as_mut().unwrap().update(event)
+            }
+        };
 
         self.process_event_result(event_loop, result);
     }
 
-    fn device_event(&mut self, event_loop: &ActiveEventLoop, device_id: DeviceId, event: DeviceEvent) {
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
         let _ = (event_loop, device_id, event);
     }
 
@@ -241,11 +272,8 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         if self.window.is_none() {
             return;
         }
-        
-        let mut results: [EventResult; 2] = [
-            EventResult::Continue,
-            EventResult::Continue,
-        ];
+
+        let mut results: [EventResult; 2] = [EventResult::Continue, EventResult::Continue];
 
         if self.is_redrawing {
             self.is_redrawing = false;
@@ -258,7 +286,11 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
                 }
             }
 
-            results[0] = self.fractal_app.as_mut().unwrap().update(Event::RedrawFinished);
+            results[0] = self
+                .fractal_app
+                .as_mut()
+                .unwrap()
+                .update(Event::RedrawFinished);
         }
 
         if self.is_resizing {
@@ -266,14 +298,25 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
             let window_size = self.window.as_ref().unwrap().window.inner_size();
 
-            results[1] = self.fractal_app.as_mut().unwrap().update(
-                Event::Resized(Vec2u32::new(window_size.width, window_size.height))
-            );
+            results[1] = self
+                .fractal_app
+                .as_mut()
+                .unwrap()
+                .update(Event::Resized(Vec2u32::new(
+                    window_size.width,
+                    window_size.height,
+                )));
         }
-        
-        if results.iter().any(|result| matches!(result, EventResult::Exit)) {
+
+        if results
+            .iter()
+            .any(|result| matches!(result, EventResult::Exit))
+        {
             _event_loop.exit();
-        } else if results.iter().any(|result| matches!(result, EventResult::Redraw)) {
+        } else if results
+            .iter()
+            .any(|result| matches!(result, EventResult::Redraw))
+        {
             self.window.as_ref().unwrap().window.request_redraw();
         }
     }
@@ -284,7 +327,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
         let _ = event_loop;
-        self.window = None; 
+        self.window = None;
         self.fractal_app = None;
     }
 
@@ -308,23 +351,21 @@ impl<'a> AppState<'_> {
     }
 }
 
-
-fn process_window_event<UserEvent>(event: winit::event::WindowEvent, mouse_position: &mut Vec2u32) -> Event<UserEvent> {
+fn process_window_event<UserEvent>(
+    event: winit::event::WindowEvent,
+    mouse_position: &mut Vec2u32,
+) -> Event<UserEvent> {
     match event {
-        winit::event::WindowEvent::Resized(size) =>
-            Event::Resized(
-                Vec2u32::new(size.width.max(1), size.height.max(1)),
-            ),
-        winit::event::WindowEvent::Focused(_is_focused) => {
-            Event::Unknown
+        winit::event::WindowEvent::Resized(size) => {
+            Event::Resized(Vec2u32::new(size.width.max(1), size.height.max(1)))
         }
-        winit::event::WindowEvent::CursorEntered { .. } => {
-            Event::Unknown
-        }
-        winit::event::WindowEvent::CursorLeft { .. } => {
-            Event::Unknown
-        }
-        winit::event::WindowEvent::CursorMoved { position: _position, .. } => {
+        winit::event::WindowEvent::Focused(_is_focused) => Event::Unknown,
+        winit::event::WindowEvent::CursorEntered { .. } => Event::Unknown,
+        winit::event::WindowEvent::CursorLeft { .. } => Event::Unknown,
+        winit::event::WindowEvent::CursorMoved {
+            position: _position,
+            ..
+        } => {
             let prev_pos = *mouse_position;
             let new_pos = Vec2u32::new(_position.x as u32, _position.y as u32);
             *mouse_position = new_pos;
@@ -334,36 +375,32 @@ fn process_window_event<UserEvent>(event: winit::event::WindowEvent, mouse_posit
                 delta: Vec2i32::from(new_pos) - Vec2i32::from(prev_pos),
             }
         }
-        winit::event::WindowEvent::Occluded(_is_occluded) => {
-            Event::Unknown
-        }
-        winit::event::WindowEvent::MouseInput { state, button, .. } => {
-            Event::MouseButton(
-                MouseButtons::from(button),
-                ElementState::from(state),
-                mouse_position.clone(),
-            )
-        }
-        winit::event::WindowEvent::MouseWheel { delta, phase: _phase, .. } => {
-            match delta {
-                winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
-                    Event::MouseWheel(mouse_position.clone(), l2)
-                }
-                winit::event::MouseScrollDelta::PixelDelta(_pix) => {
-                    Event::Unknown
-                }
+        winit::event::WindowEvent::Occluded(_is_occluded) => Event::Unknown,
+        winit::event::WindowEvent::MouseInput { state, button, .. } => Event::MouseButton(
+            MouseButtons::from(button),
+            ElementState::from(state),
+            mouse_position.clone(),
+        ),
+        winit::event::WindowEvent::MouseWheel {
+            delta,
+            phase: _phase,
+            ..
+        } => match delta {
+            winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
+                Event::MouseWheel(mouse_position.clone(), l2)
             }
-        }
-        winit::event::WindowEvent::PinchGesture { device_id: _device_id, delta, phase: _phase } => {
+            winit::event::MouseScrollDelta::PixelDelta(_pix) => Event::Unknown,
+        },
+        winit::event::WindowEvent::PinchGesture {
+            device_id: _device_id,
+            delta,
+            phase: _phase,
+        } => {
             // Event::TouchpadMagnify(mouse_position.clone(), delta as f32)
             Event::MouseWheel(mouse_position.clone(), -50.0 * delta as f32)
         }
-        winit::event::WindowEvent::CloseRequested => {
-            Event::WindowClose
-        }
-        winit::event::WindowEvent::Moved(_position) => {
-            Event::Unknown
-        }
+        winit::event::WindowEvent::CloseRequested => Event::WindowClose,
+        winit::event::WindowEvent::Moved(_position) => Event::Unknown,
         _ => Event::Unknown,
     }
 }

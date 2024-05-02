@@ -22,10 +22,7 @@ pub enum Event<UserEvent> {
     WindowClose,
     RedrawFinished,
     MouseWheel(Vec2u32, f32),
-    MouseMove {
-        position: Vec2u32,
-        delta: Vec2i32,
-    },
+    MouseMove { position: Vec2u32, delta: Vec2i32 },
     MouseButton(MouseButtons, ElementState, Vec2u32),
     Custom(UserEvent),
     TouchpadMagnify(Vec2u32, f32),
@@ -38,7 +35,6 @@ pub enum EventResult {
     Redraw,
     Exit,
 }
-
 
 impl From<winit::event::ElementState> for ElementState {
     fn from(value: winit::event::ElementState) -> Self {

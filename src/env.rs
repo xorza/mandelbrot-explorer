@@ -6,7 +6,6 @@ pub fn is_test_build() -> bool {
     }
 }
 
-
 pub fn is_debug_build() -> bool {
     if cfg!(debug_assertions) {
         true
