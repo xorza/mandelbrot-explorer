@@ -107,7 +107,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
         // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
         let limits = Limits {
-            max_push_constant_size: 1024,
+            max_push_constant_size: 256,
             ..Default::default()
         }
         .using_resolution(adapter.limits());
@@ -123,6 +123,8 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             )
             .block_on()
             .expect("Unable to find a suitable GPU adapter.");
+
+        dbg!(adapter.get_info());
 
         let window_size = window.inner_size();
         let mut surface_config = surface

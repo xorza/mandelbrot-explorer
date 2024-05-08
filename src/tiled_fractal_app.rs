@@ -93,7 +93,7 @@ impl TiledFractalApp {
             }
 
             Event::MouseWheel(position, delta) => {
-                self.move_scale(position, Vec2i32::zeroed(), delta);
+                self.move_scale(position, Vec2i32::zeroed(), 3.0 * delta);
 
                 EventResult::Redraw
             }
