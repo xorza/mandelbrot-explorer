@@ -1,8 +1,8 @@
 #![allow(non_camel_case_types)]
 
 use std::simd::prelude::*;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::sync::Arc;
 use std::time::Instant;
 use std::usize;
 
@@ -104,16 +104,16 @@ pub async fn mandelbrot_simd(
 
                     (x != tile_rect.size.x - 1
                         && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize])
-                        > MULTISAMPLE_THRESHOLD)
+                            > MULTISAMPLE_THRESHOLD)
                         || (x != 0
-                        && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize])
-                        > MULTISAMPLE_THRESHOLD)
+                            && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize])
+                                > MULTISAMPLE_THRESHOLD)
                         || (y != tile_rect.size.y - 1
-                        && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize])
-                        > MULTISAMPLE_THRESHOLD)
+                            && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize])
+                                > MULTISAMPLE_THRESHOLD)
                         || (y != 0
-                        && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize])
-                        > MULTISAMPLE_THRESHOLD)
+                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize])
+                                > MULTISAMPLE_THRESHOLD)
                 };
 
                 if should_multisample {
@@ -121,7 +121,7 @@ pub async fn mandelbrot_simd(
 
                     let xy = buffer_frame.pos
                         + buffer_frame.size * Vec2f64::new(x as f64, y as f64)
-                        / Vec2f64::from(tile_rect.size);
+                            / Vec2f64::from(tile_rect.size);
 
                     for sample_offset in &sample_offsets[1..3] {
                         let xy = xy + *sample_offset;
@@ -252,8 +252,8 @@ mod test {
                 cancel_token,
                 cancel_token_value,
             )
-                .block_on()
-                .unwrap();
+            .block_on()
+            .unwrap();
         }
 
         let now = std::time::Instant::now();
@@ -271,8 +271,8 @@ mod test {
                         cancel_token,
                         cancel_token_value,
                     )
-                        .block_on()
-                        .unwrap();
+                    .block_on()
+                    .unwrap();
                 }
             }
 
@@ -285,8 +285,8 @@ mod test {
                 cancel_token,
                 cancel_token_value,
             )
-                .block_on()
-                .unwrap()
+            .block_on()
+            .unwrap()
         };
 
         if is_debug_build() {
