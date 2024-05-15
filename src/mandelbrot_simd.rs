@@ -220,10 +220,10 @@ fn is_in_main_circle(xy: DVec2) -> bool {
 
 #[cfg(test)]
 mod test {
+    use glam::UVec2;
     use pollster::FutureExt;
 
     use crate::env::is_debug_build;
-    use crate::math::UVec2;
 
     use super::*;
 
@@ -231,8 +231,6 @@ mod test {
     fn draw_mandelbrot() {
         use std::sync::atomic::AtomicU32;
         use std::sync::Arc;
-
-        use crate::math::{DVec2, URect};
 
         let image_size = 2048;
         let tile_rect = URect::from_pos_size(UVec2::new(0, 0), UVec2::new(image_size, image_size));
