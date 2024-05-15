@@ -70,9 +70,7 @@ impl MandelTexture {
         surface_config: &wgpu::SurfaceConfiguration,
         window_size: UVec2,
     ) -> Self {
-        let texture_size = TEXTURE_SIZE
-            // device.limits().max_texture_dimension_2d
-            ;
+        let texture_size = TEXTURE_SIZE;
         assert!(texture_size >= 2048);
 
         let texture_extent = wgpu::Extent3d {
