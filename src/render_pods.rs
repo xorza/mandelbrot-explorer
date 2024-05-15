@@ -1,8 +1,7 @@
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
-
-use crate::math::Mat4x4f32;
+use glam::Mat4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -18,7 +17,7 @@ pub struct ScreenRect([Vert; 4]);
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct PushConst {
-    pub proj_mat: Mat4x4f32,
+    pub proj_mat: Mat4,
 }
 
 impl Default for ScreenRect {
@@ -63,7 +62,7 @@ impl ScreenRect {
 impl PushConst {
     pub fn new() -> Self {
         Self {
-            proj_mat: Mat4x4f32::default(),
+            proj_mat: Mat4::default(),
         }
     }
     pub fn as_bytes(&self) -> &[u8] {

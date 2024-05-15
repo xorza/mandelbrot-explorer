@@ -7,9 +7,10 @@ use std::time::Instant;
 use std::usize;
 
 use anyhow::anyhow;
+use glam::DVec2;
 
 use crate::env::is_test_build;
-use crate::math::{RectF64, RectU32, Vec2f64};
+use crate::math::{DRect, URect};
 
 const MULTISAMPLE_THRESHOLD: u8 = 64;
 const SIMD_LANE_COUNT: usize = 8;
@@ -22,8 +23,8 @@ type CountSimd = [u8; SIMD_LANE_COUNT];
 //noinspection RsConstantConditionIf
 pub async fn mandelbrot_simd(
     image_size: u32,
-    tile_rect: RectU32,
-    fractal_offset: Vec2f64,
+    tile_rect: URect,
+    fractal_offset: DVec2,
     fractal_scale: f64,
     max_iterations: u32,
     cancel_token: Arc<AtomicU32>,
@@ -35,11 +36,11 @@ pub async fn mandelbrot_simd(
 
     let buffer_frame = {
         let image_size = image_size as f64;
-        let fractal_offset = Vec2f64::new(fractal_offset.x + 0.74, fractal_offset.y);
+        let fractal_offset = DVec2::new(fractal_offset.x + 0.74, fractal_offset.y);
 
-        RectF64::from_pos_size(
-            (Vec2f64::from(tile_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
-            (Vec2f64::from(tile_rect.size) / image_size) / fractal_scale,
+        DRect::from_pos_size(
+            (DVec2::from(tile_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
+            (DVec2::from(tile_rect.size) / image_size) / fractal_scale,
         )
     };
 
@@ -48,10 +49,10 @@ pub async fn mandelbrot_simd(
         let sample_offset = 0.5 * pixel_size;
 
         [
-            Vec2f64::new(0.0, 0.0),
-            Vec2f64::new(0.0, sample_offset),
-            Vec2f64::new(sample_offset, 0.0),
-            Vec2f64::new(sample_offset, sample_offset),
+            DVec2::new(0.0, 0.0),
+            DVec2::new(0.0, sample_offset),
+            DVec2::new(sample_offset, 0.0),
+            DVec2::new(sample_offset, sample_offset),
         ]
     };
 
@@ -120,8 +121,8 @@ pub async fn mandelbrot_simd(
                     multisampled_pixels_count += 1;
 
                     let xy = buffer_frame.pos
-                        + buffer_frame.size * Vec2f64::new(x as f64, y as f64)
-                            / Vec2f64::from(tile_rect.size);
+                        + buffer_frame.size * DVec2::new(x as f64, y as f64)
+                            / DVec2::from(tile_rect.size);
 
                     for sample_offset in &sample_offsets[1..3] {
                         let xy = xy + *sample_offset;
@@ -205,12 +206,13 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     })
 }
 
-fn is_in_main_cardioid(xy: Vec2f64) -> bool {
+fn is_in_main_cardioid(xy: DVec2) -> bool {
     let q = (xy.x - 0.25).powi(2) + xy.y.powi(2);
     let result = q * (q + (xy.x - 0.25)) < 0.25 * xy.y.powi(2);
     result
 }
-fn is_in_main_circle(xy: Vec2f64) -> bool {
+
+fn is_in_main_circle(xy: DVec2) -> bool {
     let q = (xy.x + 1.0).powi(2) + xy.y.powi(2);
     let result = q < 0.25f64.powi(2);
     result
@@ -221,7 +223,7 @@ mod test {
     use pollster::FutureExt;
 
     use crate::env::is_debug_build;
-    use crate::math::Vec2u32;
+    use crate::math::UVec2;
 
     use super::*;
 
@@ -230,12 +232,11 @@ mod test {
         use std::sync::atomic::AtomicU32;
         use std::sync::Arc;
 
-        use crate::math::{RectU32, Vec2f64};
+        use crate::math::{DVec2, URect};
 
         let image_size = 2048;
-        let tile_rect =
-            RectU32::from_pos_size(Vec2u32::new(0, 0), Vec2u32::new(image_size, image_size));
-        let fractal_offset = Vec2f64::new(-0.080669055533625203, -0.4499300190992746);
+        let tile_rect = URect::from_pos_size(UVec2::new(0, 0), UVec2::new(image_size, image_size));
+        let fractal_offset = DVec2::new(-0.080669055533625203, -0.4499300190992746);
         let fractal_scale = 75.475169471081102;
         let max_iterations = 1024;
         let cancel_token = Arc::new(AtomicU32::new(0));

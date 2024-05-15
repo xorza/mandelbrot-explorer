@@ -3,12 +3,13 @@
 use std::sync::{Arc, Mutex};
 
 use bytemuck::Zeroable;
+use glam::{DVec2, IVec2, UVec2};
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
-use crate::math::{RectF64, Vec2f64, Vec2i32, Vec2u32};
+use crate::math::DRect;
 use crate::{RenderContext, WindowContext};
 
 enum ManipulateState {
@@ -17,14 +18,14 @@ enum ManipulateState {
 }
 
 pub struct TiledFractalApp {
-    window_size: Vec2u32,
+    window_size: UVec2,
     event_loop_proxy: Arc<Mutex<EventLoopProxy<UserEvent>>>,
     runtime: Runtime,
 
     manipulate_state: ManipulateState,
 
-    frame_rect: RectF64,
-    aspect: Vec2f64,
+    frame_rect: DRect,
+    aspect: DVec2,
 
     mandel_texture: MandelTexture,
 }
@@ -40,7 +41,7 @@ impl TiledFractalApp {
         window_state: &WindowContext,
         event_loop_proxy: EventLoopProxy<UserEvent>,
     ) -> TiledFractalApp {
-        let window_size = Vec2u32::new(
+        let window_size = UVec2::new(
             window_state.surface_config.width,
             window_state.surface_config.height,
         );
@@ -52,8 +53,8 @@ impl TiledFractalApp {
             window_size,
         );
 
-        let aspect = Vec2f64::new(window_size.x as f64 / window_size.y as f64, 1.0);
-        let frame_rect = RectF64::from_center_size(Vec2f64::zeroed(), aspect * 2.5);
+        let aspect = DVec2::new(window_size.x as f64 / window_size.y as f64, 1.0);
+        let frame_rect = DRect::from_center_size(DVec2::zeroed(), aspect * 2.5);
 
         let mut result = Self {
             window_size,
@@ -79,10 +80,9 @@ impl TiledFractalApp {
                     return EventResult::Continue;
                 }
 
-                self.frame_rect = RectF64::from_center_size(
+                self.frame_rect = DRect::from_center_size(
                     self.frame_rect.center(),
-                    self.frame_rect.size * Vec2f64::from(window_size)
-                        / Vec2f64::from(self.window_size),
+                    self.frame_rect.size * DVec2::from(window_size) / DVec2::from(self.window_size),
                 );
                 self.window_size = window_size;
                 self.mandel_texture.resize_window(window_size);
@@ -93,7 +93,7 @@ impl TiledFractalApp {
             }
 
             Event::MouseWheel(position, delta) => {
-                self.move_scale(position, Vec2i32::zeroed(), 3.0 * delta);
+                self.move_scale(position, IVec2::zeroed(), 3.0 * delta);
 
                 EventResult::Redraw
             }
@@ -126,16 +126,16 @@ impl TiledFractalApp {
         self.mandel_texture.render(render_info);
     }
 
-    fn move_scale(&mut self, mouse_pos: Vec2u32, mouse_delta: Vec2i32, scroll_delta: f32) {
-        let mouse_pos = Vec2i32::new(
+    fn move_scale(&mut self, mouse_pos: UVec2, mouse_delta: IVec2, scroll_delta: f32) {
+        let mouse_pos = IVec2::new(
             mouse_pos.x as i32,
             self.window_size.y as i32 - mouse_pos.y as i32,
         );
-        let mouse_pos = Vec2f64::from(mouse_pos) / Vec2f64::from(self.window_size);
+        let mouse_pos = DVec2::from(mouse_pos) / DVec2::from(self.window_size);
         let mouse_pos = mouse_pos - 0.5f64;
 
-        let mouse_delta = Vec2f64::from(mouse_delta) / Vec2f64::from(self.window_size);
-        let mouse_delta = Vec2f64::new(mouse_delta.x, -mouse_delta.y);
+        let mouse_delta = DVec2::from(mouse_delta) / DVec2::from(self.window_size);
+        let mouse_delta = DVec2::new(mouse_delta.x, -mouse_delta.y);
 
         let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
 
@@ -145,7 +145,7 @@ impl TiledFractalApp {
         let old_offset = self.frame_rect.center();
         let new_offset = old_offset - mouse_delta * new_size - mouse_pos * (new_size - old_size);
 
-        self.frame_rect = RectF64::from_center_size(new_offset, new_size);
+        self.frame_rect = DRect::from_center_size(new_offset, new_size);
 
         let focus = self.frame_rect.center() + self.frame_rect.size * mouse_pos;
 
@@ -161,7 +161,7 @@ impl TiledFractalApp {
         }
     }
 
-    fn update_fractal(&mut self, focus: Vec2f64) {
+    fn update_fractal(&mut self, focus: DVec2) {
         let event_loop_proxy = self.event_loop_proxy.clone();
 
         self.mandel_texture

@@ -4,17 +4,19 @@ use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::Zeroable;
+use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
 use crate::mandelbrot_simd::mandelbrot_simd;
-use crate::math::{RectF64, RectU32, Vec2f32, Vec2f64, Vec2u32};
+use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
 use crate::RenderContext;
 
 const TILE_SIZE: u32 = 64;
+const TEXTURE_SIZE: u32 = 4 * 1024;
 
 pub enum TileState {
     Idle,
@@ -25,7 +27,7 @@ pub enum TileState {
 
 pub struct Tile {
     pub index: usize,
-    pub tex_rect: RectU32,
+    pub tex_rect: URect,
     pub state: Arc<Mutex<TileState>>,
     pub cancel_token: Arc<AtomicU32>,
 }
@@ -40,7 +42,7 @@ pub struct MandelTexture {
     pub texture2_view: wgpu::TextureView,
     pub bind_group2: wgpu::BindGroup,
 
-    window_size: Vec2u32,
+    window_size: UVec2,
 
     runtime: Runtime,
     semaphore: Arc<Semaphore>,
@@ -49,9 +51,9 @@ pub struct MandelTexture {
     pub max_iter: u32,
     pub tiles: Vec<Tile>,
 
-    frame_rect: RectF64,
-    fractal_rect: RectF64,
-    fractal_rect_prev: RectF64,
+    frame_rect: DRect,
+    fractal_rect: DRect,
+    fractal_rect_prev: DRect,
     fractal_scale: f64,
     frame_changed: bool,
 
@@ -66,13 +68,12 @@ impl MandelTexture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         surface_config: &wgpu::SurfaceConfiguration,
-        window_size: Vec2u32,
+        window_size: UVec2,
     ) -> Self {
-        let texture_size =
-            1024 * 8
+        let texture_size = TEXTURE_SIZE
             // device.limits().max_texture_dimension_2d
             ;
-        assert!(texture_size >= 1024);
+        assert!(texture_size >= 2048);
 
         let texture_extent = wgpu::Extent3d {
             width: texture_size,
@@ -114,9 +115,9 @@ impl MandelTexture {
         for i in 0..tile_count {
             for j in 0..tile_count {
                 let index = tiles.len();
-                let rect = RectU32 {
-                    pos: Vec2u32::new(i * TILE_SIZE, j * TILE_SIZE),
-                    size: Vec2u32::new(TILE_SIZE, TILE_SIZE),
+                let rect = URect {
+                    pos: UVec2::new(i * TILE_SIZE, j * TILE_SIZE),
+                    size: UVec2::new(TILE_SIZE, TILE_SIZE),
                 };
                 tiles.push(Tile {
                     index,
@@ -357,10 +358,10 @@ impl MandelTexture {
             max_iter: 100,
             tiles,
 
-            frame_rect: RectF64::zeroed(),
+            frame_rect: DRect::zeroed(),
             fractal_scale: 1.0,
-            fractal_rect: RectF64::zeroed(),
-            fractal_rect_prev: RectF64::zeroed(),
+            fractal_rect: DRect::zeroed(),
+            fractal_rect_prev: DRect::zeroed(),
             frame_changed: false,
 
             screen_rect_buf,
@@ -370,7 +371,7 @@ impl MandelTexture {
         }
     }
 
-    pub fn update<F>(&mut self, frame_rect: RectF64, focus: Vec2f64, tile_ready_callback: F)
+    pub fn update<F>(&mut self, frame_rect: DRect, focus: DVec2, tile_ready_callback: F)
     where
         F: Fn(usize) + Clone + Send + Sync + 'static,
     {
@@ -382,9 +383,9 @@ impl MandelTexture {
             self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
             self.fractal_scale = frame_rect.size.length_squared();
-            self.fractal_rect = RectF64::from_center_size(
+            self.fractal_rect = DRect::from_center_size(
                 frame_rect.center(),
-                Vec2f64::all(
+                DVec2::splat(
                     frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64,
                 ),
             );
@@ -506,14 +507,12 @@ impl MandelTexture {
 
             let offset = (self.fractal_rect_prev.center() - self.fractal_rect.center())
                 / self.fractal_rect_prev.size;
-            let offset = 2.0 * Vec2f64::new(offset.x, -offset.y);
+            let offset = 2.0 * DVec2::new(offset.x, -offset.y);
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
 
-            // println!("blit offset: {:?}, scale: {:?}", offset, scale);
             let mut pc = PushConst::new();
-            pc.proj_mat
-                .scale(Vec2f32::from(scale))
-                .translate2d(Vec2f32::from(offset));
+            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
+                * Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0));
 
             render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
 
@@ -577,13 +576,11 @@ impl MandelTexture {
     }
 
     fn surface_render(&self, render_info: &RenderContext) {
-        let tex_size = Vec2f32::all(self.texture_size as f32);
-        let win_size = Vec2f32::from(self.window_size);
+        let tex_size = Vec2::splat(self.texture_size as f32);
+        let win_size = Vec2::new(self.window_size.x as f32, self.window_size.y as f32);
         let scale = tex_size / win_size;
         let offset =
             2.0 * (self.fractal_rect.center() - self.frame_rect.center()) / self.frame_rect.size;
-
-        // println!( "render offset: {:?}, scale: {:?}", offset, scale);
 
         let mut command_encoder = render_info
             .device
@@ -608,7 +605,8 @@ impl MandelTexture {
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
             let mut pc = PushConst::new();
-            pc.proj_mat.translate2d(Vec2f32::from(offset)).scale(scale);
+            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
+                * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
 
             render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
 
@@ -619,20 +617,20 @@ impl MandelTexture {
         render_info.queue.submit(Some(command_encoder.finish()));
     }
 
-    pub fn resize_window(&mut self, window_size: Vec2u32) {
+    pub fn resize_window(&mut self, window_size: UVec2) {
         self.window_size = window_size;
     }
 }
 
 impl Tile {
-    pub(crate) fn fractal_rect(&self, tex_size: u32, fractal_rect: RectF64) -> RectF64 {
-        let abs_frame_size = Vec2f64::all(tex_size as f64);
-        let abs_tile_pos = Vec2f64::from(self.tex_rect.pos);
-        let abs_tile_size = Vec2f64::from(self.tex_rect.size);
+    pub(crate) fn fractal_rect(&self, tex_size: u32, fractal_rect: DRect) -> DRect {
+        let abs_frame_size = DVec2::splat(tex_size as f64);
+        let abs_tile_pos = DVec2::from(self.tex_rect.pos);
+        let abs_tile_size = DVec2::from(self.tex_rect.size);
 
         let tile_size = fractal_rect.size * abs_tile_size / abs_frame_size;
         let tile_pos = fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
 
-        RectF64::from_pos_size(tile_pos, tile_size)
+        DRect::from_pos_size(tile_pos, tile_size)
     }
 }

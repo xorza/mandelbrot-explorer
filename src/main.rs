@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use bytemuck::Zeroable;
+use glam::{IVec2, UVec2};
 use pollster::FutureExt;
 use tokio::time::Instant;
 use wgpu::Limits;
@@ -13,7 +14,6 @@ use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
 use winit::window::WindowId;
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
-use crate::math::{Vec2i32, Vec2u32};
 use crate::tiled_fractal_app::UserEvent;
 
 mod env;
@@ -47,7 +47,7 @@ struct AppState<'window> {
     is_redrawing: bool,
     is_resizing: bool,
     has_render_error_scope: bool,
-    mouse_position: Option<Vec2u32>,
+    mouse_position: Option<UVec2>,
 }
 
 pub struct RenderContext<'a> {
@@ -98,7 +98,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
             })
@@ -178,7 +178,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         if self.mouse_position.is_none() {
             match event {
                 winit::event::WindowEvent::CursorMoved { position, .. } => {
-                    let position = Vec2u32::new(position.x as u32, position.y as u32);
+                    let position = UVec2::new(position.x as u32, position.y as u32);
                     self.mouse_position = Some(position);
                 }
                 _ => {}
@@ -191,7 +191,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
                 let window_state = self.window.as_mut().unwrap();
                 let window_size = window_state.window.inner_size();
 
-                let window_size = Vec2u32::new(window_size.width.max(1), window_size.height.max(1));
+                let window_size = UVec2::new(window_size.width.max(1), window_size.height.max(1));
                 window_state.surface_config.width = window_size.x;
                 window_state.surface_config.height = window_size.y;
                 window_state
@@ -247,7 +247,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             }
 
             event => {
-                let mut empty_mouse_position = Vec2u32::zeroed();
+                let mut empty_mouse_position = UVec2::zeroed();
                 let mouse_position = self
                     .mouse_position
                     .as_mut()
@@ -304,7 +304,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
                 .fractal_app
                 .as_mut()
                 .unwrap()
-                .update(Event::Resized(Vec2u32::new(
+                .update(Event::Resized(UVec2::new(
                     window_size.width,
                     window_size.height,
                 )));
@@ -355,11 +355,11 @@ impl<'a> AppState<'_> {
 
 fn process_window_event<UserEvent>(
     event: winit::event::WindowEvent,
-    mouse_position: &mut Vec2u32,
+    mouse_position: &mut UVec2,
 ) -> Event<UserEvent> {
     match event {
         winit::event::WindowEvent::Resized(size) => {
-            Event::Resized(Vec2u32::new(size.width.max(1), size.height.max(1)))
+            Event::Resized(UVec2::new(size.width.max(1), size.height.max(1)))
         }
         winit::event::WindowEvent::Focused(_is_focused) => Event::Unknown,
         winit::event::WindowEvent::CursorEntered { .. } => Event::Unknown,
@@ -369,12 +369,12 @@ fn process_window_event<UserEvent>(
             ..
         } => {
             let prev_pos = *mouse_position;
-            let new_pos = Vec2u32::new(_position.x as u32, _position.y as u32);
+            let new_pos = UVec2::new(_position.x as u32, _position.y as u32);
             *mouse_position = new_pos;
 
             Event::MouseMove {
                 position: new_pos,
-                delta: Vec2i32::from(new_pos) - Vec2i32::from(prev_pos),
+                delta: IVec2::try_from(new_pos).unwrap() - IVec2::try_from(prev_pos).unwrap(),
             }
         }
         winit::event::WindowEvent::Occluded(_is_occluded) => Event::Unknown,

@@ -1,4 +1,4 @@
-use crate::math::{Vec2i32, Vec2u32};
+use glam::{IVec2, UVec2};
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum MouseButtons {
@@ -18,14 +18,14 @@ pub enum ElementState {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event<UserEvent> {
-    Resized(Vec2u32),
+    Resized(UVec2),
     WindowClose,
     RedrawFinished,
-    MouseWheel(Vec2u32, f32),
-    MouseMove { position: Vec2u32, delta: Vec2i32 },
-    MouseButton(MouseButtons, ElementState, Vec2u32),
+    MouseWheel(UVec2, f32),
+    MouseMove { position: UVec2, delta: IVec2 },
+    MouseButton(MouseButtons, ElementState, UVec2),
     Custom(UserEvent),
-    TouchpadMagnify(Vec2u32, f32),
+    TouchpadMagnify(UVec2, f32),
     Unknown,
 }
 
