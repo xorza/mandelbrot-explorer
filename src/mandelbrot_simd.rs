@@ -65,7 +65,6 @@ pub fn mandelbrot_simd(
             for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
                 if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
                     if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                        println!("Cancelled");
                         return Err(anyhow!("Cancelled"));
                     }
                 }
@@ -144,7 +143,6 @@ mod test {
 
     #[test]
     fn draw_mandelbrot() {
-        use std::sync::atomic::AtomicU32;
         use std::sync::Arc;
 
         let image_size = 2048;

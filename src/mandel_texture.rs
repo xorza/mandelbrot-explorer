@@ -444,6 +444,7 @@ impl MandelTexture {
                 // not in view, skip
                 return;
             }
+
             tile_state.cancel();
 
             let img_size = self.texture_size;
@@ -462,7 +463,7 @@ impl MandelTexture {
             let task_handle = self.runtime.spawn(async move {
                 let _permit = semaphore.acquire().await.unwrap();
 
-                let result = {
+                let compute_ok = {
                     let buffer = &mut *buffer.lock().unwrap();
                     let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
@@ -475,14 +476,13 @@ impl MandelTexture {
                         cancel_token_clone,
                         buffer,
                     )
+                    .is_ok()
                 };
 
                 let mut tile_state = tile_state_clone.lock().unwrap();
-                if result.is_ok() {
+                if compute_ok {
                     *tile_state = TileState::WaitForUpload { buffer };
                     (callback)(tile_index);
-                } else {
-                    tile_state.cancel();
                 }
             });
 
@@ -654,11 +654,12 @@ impl TileState {
         if let TileState::Computing {
             task_handle,
             cancel_token,
-        } = &self
+        } = self
         {
             cancel_token.store(true, std::sync::atomic::Ordering::Relaxed);
             task_handle.abort();
         }
+
         *self = TileState::Idle;
     }
 
