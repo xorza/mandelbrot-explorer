@@ -295,9 +295,10 @@ impl<'a> AppState<'_> {
             return;
         }
 
-        let window_state = self.window.as_mut().unwrap();
-
+        self.is_redraw_requested = false;
         self.is_redrawing = true;
+
+        let window_state = self.window.as_mut().unwrap();
 
         let surface_texture = match window_state.surface.get_current_texture() {
             Ok(frame) => frame,

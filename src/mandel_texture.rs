@@ -107,7 +107,7 @@ impl MandelTexture {
             view_formats: &[],
             label: None,
         });
-        let texture_view1 = texture1.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture1_view = texture1.create_view(&wgpu::TextureViewDescriptor::default());
 
         let texture2 = device.create_texture(&wgpu::TextureDescriptor {
             size: texture_extent,
@@ -121,7 +121,7 @@ impl MandelTexture {
             view_formats: &[],
             label: None,
         });
-        let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
+        let texture2_view = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
         let tile_count = texture_size / TILE_SIZE;
         let mut tiles = Vec::with_capacity(tile_count as usize * tile_count as usize);
@@ -263,7 +263,7 @@ impl MandelTexture {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view1),
+                    resource: wgpu::BindingResource::TextureView(&texture1_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -281,7 +281,7 @@ impl MandelTexture {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view2),
+                    resource: wgpu::BindingResource::TextureView(&texture2_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -357,11 +357,11 @@ impl MandelTexture {
 
         Self {
             texture1,
-            texture1_view: texture_view1,
+            texture1_view,
             bind_group1,
 
             texture2,
-            texture2_view: texture_view2,
+            texture2_view,
             bind_group2,
 
             blit_pipeline,
@@ -535,8 +535,8 @@ impl MandelTexture {
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
 
             let mut pc = PushConst::new();
-            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
-                * Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0));
+            pc.proj_mat = Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0))
+                * Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0));
             pc.texture_size = Vec2::splat(self.texture_size as f32);
 
             render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
