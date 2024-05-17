@@ -13,7 +13,6 @@ use glam::DVec2;
 use crate::env::is_test_build;
 use crate::math::{DRect, URect};
 
-const MULTISAMPLE_THRESHOLD: u16 = 64;
 const SIMD_LANE_COUNT: usize = 8;
 pub const MAX_ITER: u32 = 4500;
 
@@ -47,12 +46,11 @@ pub async fn mandelbrot_simd(
     max_iterations: u32,
     cancel_token: Arc<AtomicU32>,
     cancel_token_value: u32,
-) -> anyhow::Result<Vec<Pixel>> {
+    buffer: &mut [Pixel],
+) -> anyhow::Result<()> {
+    assert_eq!(buffer.len(), (tile_rect.size.x * tile_rect.size.y) as usize);
+
     let now = Instant::now();
-
-    let mut buffer: Vec<Pixel> =
-        vec![Pixel::default(); (tile_rect.size.x * tile_rect.size.y) as usize];
-
     let buffer_frame = {
         let image_size = image_size as f64;
         let fractal_offset = DVec2::new(fractal_offset.x, fractal_offset.y);
@@ -83,9 +81,8 @@ pub async fn mandelbrot_simd(
                 );
 
                 let values_simd = pixel(max_iterations, cx, cy);
-                let start_index = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
-                buffer[start_index..start_index + SIMD_LANE_COUNT]
-                    .copy_from_slice(values_simd.as_slice());
+                let idx = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+                buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
             }
         }
     }
@@ -102,7 +99,7 @@ pub async fn mandelbrot_simd(
         // }
     }
 
-    Ok(buffer)
+    Ok(())
 }
 
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
@@ -158,6 +155,7 @@ mod test {
         let max_iterations = 1024;
         let cancel_token = Arc::new(AtomicU32::new(0));
         let cancel_token_value = 0;
+        let mut buffer = vec![Pixel::default(); (image_size * image_size) as usize];
 
         if !is_debug_build() {
             let cancel_token = cancel_token.clone();
@@ -169,6 +167,7 @@ mod test {
                 max_iterations,
                 cancel_token,
                 cancel_token_value,
+                &mut buffer,
             )
             .block_on()
             .unwrap();
@@ -188,6 +187,7 @@ mod test {
                         max_iterations,
                         cancel_token,
                         cancel_token_value,
+                        &mut buffer,
                     )
                     .block_on()
                     .unwrap();
@@ -202,6 +202,7 @@ mod test {
                 max_iterations,
                 cancel_token,
                 cancel_token_value,
+                &mut buffer,
             )
             .block_on()
             .unwrap()

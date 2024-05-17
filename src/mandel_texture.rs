@@ -10,6 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
+use crate::buffer_pool::BufferPool;
 use crate::mandelbrot_simd::{mandelbrot_simd, Pixel, MAX_ITER};
 use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
@@ -21,7 +22,7 @@ const TEXTURE_SIZE: u32 = 4 * 1024;
 pub enum TileState {
     Idle,
     Computing { task_handle: JoinHandle<()> },
-    WaitForUpload { buffer: Vec<Pixel> },
+    WaitForUpload { buffer: Vec<u8> },
     Ready,
 }
 
@@ -61,6 +62,8 @@ pub struct MandelTexture {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub screen_pipeline: wgpu::RenderPipeline,
     pub sampler: wgpu::Sampler,
+
+    buf_pool: BufferPool,
 }
 
 fn calc_max_iters(fractal_rect: DRect) -> u32 {
@@ -345,6 +348,8 @@ impl MandelTexture {
             multiview: None,
         });
 
+        let buffer_size = (TILE_SIZE * TILE_SIZE) as usize * size_of::<Pixel>();
+
         Self {
             texture1,
             texture1_view: texture_view1,
@@ -374,6 +379,8 @@ impl MandelTexture {
             bind_group_layout,
             screen_pipeline,
             sampler,
+
+            buf_pool: BufferPool::new(buffer_size),
         }
     }
 
@@ -451,9 +458,13 @@ impl MandelTexture {
             let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
             let semaphore = self.semaphore.clone();
 
+            let mut buffer = self.buf_pool.take();
+
             let task_handle = self.runtime.spawn(async move {
                 let _ = semaphore.acquire().await.unwrap();
-                let buf = mandelbrot_simd(
+
+                let pixel_buf: &mut [Pixel] = bytemuck::cast_slice_mut(&mut buffer);
+                let result = mandelbrot_simd(
                     img_size,
                     tile_rect,
                     -fractal_rect.center(),
@@ -461,13 +472,13 @@ impl MandelTexture {
                     max_iters,
                     cancel_token,
                     cancel_token_value,
+                    pixel_buf,
                 )
-                .await
-                .ok();
+                .await;
 
-                if let Some(buf) = buf {
+                if result.is_ok() {
                     let mut tile_state = tile_state_clone.lock().unwrap();
-                    *tile_state = TileState::WaitForUpload { buffer: buf };
+                    *tile_state = TileState::WaitForUpload { buffer };
                     (callback)(tile_index);
                 }
             });
@@ -536,48 +547,42 @@ impl MandelTexture {
         self.fractal_rect_prev = self.fractal_rect;
     }
 
-    fn upload_tiles(&self, render_info: &RenderContext) {
+    fn upload_tiles(&mut self, render_info: &RenderContext) {
         self.tiles.iter().for_each(|tile| {
-            let mut buff: Option<Vec<Pixel>> = None;
+            let mut tile_state = tile.state.lock().unwrap();
+            if let TileState::WaitForUpload { .. } = *tile_state {
+                let mut ready = TileState::Ready;
+                swap(&mut ready, &mut *tile_state);
 
-            {
-                let mut tile_state = tile.state.lock().unwrap();
-                if let TileState::WaitForUpload { buffer } = &mut *tile_state {
-                    let mut new_buff: Vec<Pixel> = Vec::new();
-                    swap(&mut new_buff, buffer);
-                    buff = Some(new_buff);
-                }
-                if buff.is_some() {
-                    *tile_state = TileState::Ready;
-                } else {
-                    return;
-                }
-            }
+                let TileState::WaitForUpload { buffer } = ready else {
+                    panic!();
+                };
 
-            let buff = buff.unwrap();
-            render_info.queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &self.texture1,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: tile.tex_rect.pos.x,
-                        y: tile.tex_rect.pos.y,
-                        z: 0,
+                render_info.queue.write_texture(
+                    wgpu::ImageCopyTexture {
+                        texture: &self.texture1,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: tile.tex_rect.pos.x,
+                            y: tile.tex_rect.pos.y,
+                            z: 0,
+                        },
+                        aspect: wgpu::TextureAspect::All,
                     },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                bytemuck::cast_slice(&buff),
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
-                    rows_per_image: Some(tile.tex_rect.size.y),
-                },
-                wgpu::Extent3d {
-                    width: tile.tex_rect.size.x,
-                    height: tile.tex_rect.size.y,
-                    depth_or_array_layers: 1,
-                },
-            );
+                    bytemuck::cast_slice(&buffer),
+                    wgpu::ImageDataLayout {
+                        offset: 0,
+                        bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
+                        rows_per_image: Some(tile.tex_rect.size.y),
+                    },
+                    wgpu::Extent3d {
+                        width: tile.tex_rect.size.x,
+                        height: tile.tex_rect.size.y,
+                        depth_or_array_layers: 1,
+                    },
+                );
+                self.buf_pool.release(buffer);
+            }
         });
     }
 

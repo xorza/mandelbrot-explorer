@@ -16,6 +16,7 @@ use winit::window::WindowId;
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::tiled_fractal_app::UserEvent;
 
+mod buffer_pool;
 mod env;
 mod event;
 mod mandel_texture;
