@@ -39,37 +39,36 @@ pub struct Tile {
     pub cancel_token: Arc<AtomicU32>,
 }
 
+#[derive(Debug)]
 pub struct MandelTexture {
-    pub texture1: wgpu::Texture,
-    pub texture1_view: wgpu::TextureView,
-    pub bind_group1: wgpu::BindGroup,
-    blit_pipeline: wgpu::RenderPipeline,
+    texture1: wgpu::Texture,
+    texture1_view: wgpu::TextureView,
+    bind_group1: wgpu::BindGroup,
 
-    pub texture2: wgpu::Texture,
-    pub texture2_view: wgpu::TextureView,
-    pub bind_group2: wgpu::BindGroup,
+    texture2: wgpu::Texture,
+    texture2_view: wgpu::TextureView,
+    bind_group2: wgpu::BindGroup,
+
+    screen_rect_buf: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+
+    blit_pipeline: wgpu::RenderPipeline,
+    screen_pipeline: wgpu::RenderPipeline,
+
+    buf_pool: BufferPool,
 
     window_size: UVec2,
+    texture_size: u32,
 
     runtime: Runtime,
     semaphore: Arc<Semaphore>,
-
-    pub texture_size: u32,
-    pub max_iter: u32,
-    pub tiles: Vec<Tile>,
+    tiles: Vec<Tile>,
 
     frame_rect: DRect,
     fractal_rect: DRect,
     fractal_rect_prev: DRect,
-    fractal_scale: f64,
     frame_changed: bool,
-
-    pub screen_rect_buf: wgpu::Buffer,
-    pub bind_group_layout: wgpu::BindGroupLayout,
-    pub screen_pipeline: wgpu::RenderPipeline,
-    pub sampler: wgpu::Sampler,
-
-    buf_pool: BufferPool,
 }
 
 fn calc_max_iters(fractal_rect: DRect) -> u32 {
@@ -88,6 +87,7 @@ impl MandelTexture {
     ) -> Self {
         let texture_size = TEXTURE_SIZE;
         assert!(texture_size >= 2048);
+        assert_eq!(texture_size % TILE_SIZE, 0);
 
         let texture_extent = wgpu::Extent3d {
             width: texture_size,
@@ -123,7 +123,6 @@ impl MandelTexture {
         });
         let texture_view2 = texture2.create_view(&wgpu::TextureViewDescriptor::default());
 
-        assert_eq!(texture_size % TILE_SIZE, 0);
         let tile_count = texture_size / TILE_SIZE;
         let mut tiles = Vec::with_capacity(tile_count as usize * tile_count as usize);
         for i in 0..tile_count {
@@ -372,11 +371,9 @@ impl MandelTexture {
             semaphore,
 
             texture_size,
-            max_iter: 255,
             tiles,
 
             frame_rect: DRect::zeroed(),
-            fractal_scale: 1.0,
             fractal_rect: DRect::zeroed(),
             fractal_rect_prev: DRect::zeroed(),
             frame_changed: false,
@@ -395,30 +392,34 @@ impl MandelTexture {
         F: Fn(usize) + Clone + Send + Sync + 'static,
     {
         self.frame_rect = frame_rect;
-        let scale_changed = frame_rect.size.length_squared() != self.fractal_scale;
-        let off_frame = !self.fractal_rect.contains(&frame_rect);
-        let frame_changed = off_frame || scale_changed;
+        let new_fractal_rect = DRect::from_center_size(
+            frame_rect.center(),
+            DVec2::new(
+                frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64,
+                frame_rect.size.y * self.texture_size as f64 / self.window_size.y as f64,
+            ),
+        );
+
+        let frame_changed = !self.fractal_rect.contains(&frame_rect)
+            || self.fractal_rect.size != new_fractal_rect.size;
 
         if frame_changed {
             self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
-            self.fractal_scale = frame_rect.size.length_squared();
-            self.fractal_rect = DRect::from_center_size(
-                frame_rect.center(),
-                DVec2::splat(
-                    frame_rect.size.x * self.texture_size as f64 / self.window_size.x as f64,
-                ),
-            );
+            self.fractal_rect = new_fractal_rect;
             // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
             // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
         }
 
-        let fractal_rect = self.fractal_rect;
-        let max_iters = calc_max_iters(fractal_rect);
+        let max_iters = calc_max_iters(self.fractal_rect);
 
         self.tiles.sort_unstable_by(|a, b| {
-            let a_center = a.fractal_rect(self.texture_size, fractal_rect).center();
-            let b_center = b.fractal_rect(self.texture_size, fractal_rect).center();
+            let a_center = a
+                .fractal_rect(self.texture_size, self.fractal_rect)
+                .center();
+            let b_center = b
+                .fractal_rect(self.texture_size, self.fractal_rect)
+                .center();
 
             let a_dist = (a_center - focus).length_squared();
             let b_dist = (b_center - focus).length_squared();
@@ -430,9 +431,9 @@ impl MandelTexture {
             let tile_state = &mut *tile.state.lock().unwrap();
 
             let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
-            let is_in_view = frame_rect.intersects(&tile_rect);
+            let tile_in_view = frame_rect.intersects(&tile_rect);
 
-            if frame_changed || !is_in_view {
+            if frame_changed || !tile_in_view {
                 // cancel tile
                 if let TileState::Computing { task_handle } = tile_state {
                     tile.cancel_token
@@ -441,7 +442,7 @@ impl MandelTexture {
                     *tile_state = TileState::Idle;
                 }
             }
-            if !is_in_view || matches!(tile_state, TileState::Computing { .. }) {
+            if !tile_in_view || matches!(tile_state, TileState::Computing { .. }) {
                 // when panning, tile could be already in progress
                 // or
                 // not in view, skip
@@ -452,6 +453,7 @@ impl MandelTexture {
             let img_size = self.texture_size;
             let tex_rect = tile.tex_rect;
             let tile_index = tile.index;
+            let fractal_rect = self.fractal_rect;
 
             let callback = tile_ready_callback.clone();
             let cancel_token = tile.cancel_token.clone();

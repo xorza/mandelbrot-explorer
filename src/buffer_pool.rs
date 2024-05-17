@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug)]
 pub struct BufferPool {
     buf_size: usize,
     buffers: Vec<Arc<Mutex<Vec<u8>>>>,
@@ -24,7 +25,7 @@ impl BufferPool {
             buf.clone()
         } else {
             self.total_allocated += 1;
-            println!("Total allocated buffers: {}", self.total_allocated);
+            // println!("Total allocated buffers: {}", self.total_allocated);
 
             self.buffers
                 .push(Arc::new(Mutex::new(vec![0u8; self.buf_size])));
