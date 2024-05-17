@@ -7,6 +7,7 @@ use glam::{DVec2, IVec2, UVec2};
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
+use crate::env::is_debug_build;
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::DRect;
@@ -116,12 +117,18 @@ impl TiledFractalApp {
                 }
             },
             Event::KeyboardInput(key) => {
+                if !is_debug_build() {
+                    return EventResult::Continue;
+                }
+
                 if key.state != winit::event::ElementState::Released {
                     return EventResult::Continue;
                 }
 
                 match key.physical_key {
                     winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) => {
+                        let count = self.mandel_texture.buf_pool.taken_buffer_count();
+                        println!("Taken buffer count: {}", count);
                         EventResult::Continue
                     }
                     winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {

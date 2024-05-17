@@ -25,11 +25,18 @@ impl BufferPool {
             buf.clone()
         } else {
             self.total_allocated += 1;
-            // println!("Total allocated buffers: {}", self.total_allocated);
+            println!("Total allocated buffers: {}", self.total_allocated);
 
             self.buffers
                 .push(Arc::new(Mutex::new(vec![0u8; self.buf_size])));
             self.buffers.last().unwrap().clone()
         }
+    }
+
+    pub(crate) fn taken_buffer_count(&self) -> u32 {
+        self.buffers
+            .iter()
+            .filter(|buf| Arc::strong_count(buf) > 1)
+            .count() as u32
     }
 }

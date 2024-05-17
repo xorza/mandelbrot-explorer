@@ -56,7 +56,7 @@ pub struct MandelTexture {
     blit_pipeline: wgpu::RenderPipeline,
     screen_pipeline: wgpu::RenderPipeline,
 
-    buf_pool: BufferPool,
+    pub(crate) buf_pool: BufferPool,
 
     window_size: UVec2,
     texture_size: u32,
@@ -382,7 +382,7 @@ impl MandelTexture {
             screen_pipeline,
             sampler,
 
-            buf_pool: BufferPool::new(buffer_size, 450),
+            buf_pool: BufferPool::new(buffer_size, 1000),
         }
     }
 

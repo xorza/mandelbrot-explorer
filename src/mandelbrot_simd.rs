@@ -146,8 +146,6 @@ mod test {
 
         let image_size = 2048;
         let tile_rect = URect::from_pos_size(UVec2::new(0, 0), UVec2::new(image_size, image_size));
-        let fractal_offset = DVec2::new(-0.080669055533625203, -0.4499300190992746);
-        let fractal_scale = 75.475169471081102;
         let fractal_offset = DVec2::new(0.10486747136388758, 0.9244368813525663);
         let fractal_scale = 32.0;
         let max_iterations = 1024;
