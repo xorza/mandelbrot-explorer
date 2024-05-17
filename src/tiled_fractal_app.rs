@@ -115,6 +115,25 @@ impl TiledFractalApp {
                     EventResult::Continue
                 }
             },
+            Event::KeyboardInput(key) => {
+                if key.state != winit::event::ElementState::Released {
+                    return EventResult::Continue;
+                }
+
+                match key.physical_key {
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) => {
+                        EventResult::Continue
+                    }
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {
+                        EventResult::Redraw
+                    }
+                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyD) => {
+                        self.update_fractal(self.frame_rect.center());
+                        EventResult::Redraw
+                    }
+                    _ => EventResult::Continue,
+                }
+            }
 
             Event::Custom(event) => self.update_user_event(event),
 

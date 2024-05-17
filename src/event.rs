@@ -26,6 +26,7 @@ pub enum Event<UserEvent> {
     MouseButton(MouseButtons, ElementState, UVec2),
     Custom(UserEvent),
     TouchpadMagnify(UVec2, f32),
+    KeyboardInput(winit::event::KeyEvent),
     Unknown,
 }
 

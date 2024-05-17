@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::mem::{size_of, swap};
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use bytemuck::Zeroable;
@@ -25,6 +25,7 @@ pub enum TileState {
     Idle,
     Computing {
         task_handle: JoinHandle<()>,
+        cancel_token: Arc<AtomicBool>,
     },
     WaitForUpload {
         buffer: Arc<Mutex<Vec<u8>>>,
@@ -36,7 +37,6 @@ pub struct Tile {
     pub index: usize,
     pub tex_rect: URect,
     pub state: Arc<Mutex<TileState>>,
-    pub cancel_token: Arc<AtomicU32>,
 }
 
 #[derive(Debug)]
@@ -136,7 +136,6 @@ impl MandelTexture {
                     index,
                     tex_rect: rect,
                     state: Arc::new(Mutex::new(TileState::Idle)),
-                    cancel_token: Arc::new(AtomicU32::new(0)),
                 });
             }
         }
@@ -392,6 +391,7 @@ impl MandelTexture {
         F: Fn(usize) + Clone + Send + Sync + 'static,
     {
         self.frame_rect = frame_rect;
+
         let new_fractal_rect = DRect::from_center_size(
             frame_rect.center(),
             DVec2::new(
@@ -427,28 +427,24 @@ impl MandelTexture {
             a_dist.partial_cmp(&b_dist).unwrap()
         });
 
-        self.tiles.iter().for_each(|tile| {
-            let tile_state = &mut *tile.state.lock().unwrap();
+        self.tiles.iter_mut().for_each(|tile| {
+            let mut tile_state = tile.state.lock().unwrap();
 
             let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
             let tile_in_view = frame_rect.intersects(&tile_rect);
 
-            if frame_changed || !tile_in_view {
-                // cancel tile
-                if let TileState::Computing { task_handle } = tile_state {
-                    tile.cancel_token
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    task_handle.abort();
-                    *tile_state = TileState::Idle;
-                }
+            if !tile_in_view {
+                tile_state.cancel();
+                return;
             }
-            if !tile_in_view || matches!(tile_state, TileState::Computing { .. }) {
+
+            if tile_state.is_computing() && !frame_changed {
                 // when panning, tile could be already in progress
                 // or
                 // not in view, skip
                 return;
             }
-            *tile_state = TileState::Idle;
+            tile_state.cancel();
 
             let img_size = self.texture_size;
             let tex_rect = tile.tex_rect;
@@ -456,9 +452,9 @@ impl MandelTexture {
             let fractal_rect = self.fractal_rect;
 
             let callback = tile_ready_callback.clone();
-            let cancel_token = tile.cancel_token.clone();
+            let cancel_token = Arc::new(AtomicBool::new(false));
+            let cancel_token_clone = cancel_token.clone();
             let tile_state_clone = tile.state.clone();
-            let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
             let semaphore = self.semaphore.clone();
 
             let buffer = self.buf_pool.take();
@@ -476,8 +472,7 @@ impl MandelTexture {
                         -fractal_rect.center(),
                         1.0 / fractal_rect.size.y,
                         max_iters,
-                        cancel_token,
-                        cancel_token_value,
+                        cancel_token_clone,
                         buffer,
                     )
                 };
@@ -487,11 +482,14 @@ impl MandelTexture {
                     *tile_state = TileState::WaitForUpload { buffer };
                     (callback)(tile_index);
                 } else {
-                    *tile_state = TileState::Idle;
+                    tile_state.cancel();
                 }
             });
 
-            *tile_state = TileState::Computing { task_handle };
+            *tile_state = TileState::Computing {
+                task_handle,
+                cancel_token,
+            };
         });
     }
 
@@ -648,5 +646,23 @@ impl Tile {
         let tile_pos = fractal_rect.pos + fractal_rect.size * abs_tile_pos / abs_frame_size;
 
         DRect::from_pos_size(tile_pos, tile_size)
+    }
+}
+
+impl TileState {
+    fn cancel(&mut self) {
+        if let TileState::Computing {
+            task_handle,
+            cancel_token,
+        } = &self
+        {
+            cancel_token.store(true, std::sync::atomic::Ordering::Relaxed);
+            task_handle.abort();
+        }
+        *self = TileState::Idle;
+    }
+
+    fn is_computing(&self) -> bool {
+        matches!(self, TileState::Computing { .. })
     }
 }

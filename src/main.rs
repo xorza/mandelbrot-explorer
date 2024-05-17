@@ -403,6 +403,7 @@ fn process_window_event<UserEvent>(
         }
         winit::event::WindowEvent::CloseRequested => Event::WindowClose,
         winit::event::WindowEvent::Moved(_position) => Event::Unknown,
+        winit::event::WindowEvent::KeyboardInput { event, .. } => Event::KeyboardInput(event),
         _ => Event::Unknown,
     }
 }

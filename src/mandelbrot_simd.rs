@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 
 use std::simd::prelude::*;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 use std::usize;
@@ -44,8 +44,7 @@ pub fn mandelbrot_simd(
     fractal_offset: DVec2,
     fractal_scale: f64,
     max_iterations: u32,
-    cancel_token: Arc<AtomicU32>,
-    cancel_token_value: u32,
+    cancel_token: Arc<AtomicBool>,
     buffer: &mut [Pixel],
 ) -> anyhow::Result<()> {
     assert_eq!(buffer.len(), (tex_rect.size.x * tex_rect.size.y) as usize);
@@ -65,8 +64,8 @@ pub fn mandelbrot_simd(
         for y in 0..tex_rect.size.y {
             for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
                 if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
-                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value
-                    {
+                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                        println!("Cancelled");
                         return Err(anyhow!("Cancelled"));
                     }
                 }
@@ -153,7 +152,7 @@ mod test {
         let fractal_offset = DVec2::new(-0.080669055533625203, -0.4499300190992746);
         let fractal_scale = 75.475169471081102;
         let max_iterations = 1024;
-        let cancel_token = Arc::new(AtomicU32::new(0));
+        let cancel_token = Arc::new(AtomicBool::new(false));
         let cancel_token_value = 0;
         let mut buffer = vec![Pixel::default(); (image_size * image_size) as usize];
 
@@ -166,7 +165,6 @@ mod test {
                 fractal_scale,
                 max_iterations,
                 cancel_token,
-                cancel_token_value,
                 &mut buffer,
             )
             .block_on()
@@ -186,7 +184,6 @@ mod test {
                         fractal_scale,
                         max_iterations,
                         cancel_token,
-                        cancel_token_value,
                         &mut buffer,
                     )
                     .block_on()
@@ -201,7 +198,6 @@ mod test {
                 fractal_scale,
                 max_iterations,
                 cancel_token,
-                cancel_token_value,
                 &mut buffer,
             )
             .block_on()
