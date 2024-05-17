@@ -16,16 +16,22 @@ use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
 use crate::RenderContext;
 
-const TILE_SIZE: u32 = 64;
+const TILE_SIZE: u32 = 128;
 const TEXTURE_SIZE: u32 = 4 * 1024;
 
+#[derive(Debug, Default)]
 pub enum TileState {
+    #[default]
     Idle,
-    Computing { task_handle: JoinHandle<()> },
-    WaitForUpload { buffer: Vec<u8> },
-    Ready,
+    Computing {
+        task_handle: JoinHandle<()>,
+    },
+    WaitForUpload {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    },
 }
 
+#[derive(Debug)]
 pub struct Tile {
     pub index: usize,
     pub tex_rect: URect,
@@ -380,7 +386,7 @@ impl MandelTexture {
             screen_pipeline,
             sampler,
 
-            buf_pool: BufferPool::new(buffer_size),
+            buf_pool: BufferPool::new(buffer_size, 450),
         }
     }
 
@@ -392,6 +398,7 @@ impl MandelTexture {
         let scale_changed = frame_rect.size.length_squared() != self.fractal_scale;
         let off_frame = !self.fractal_rect.contains(&frame_rect);
         let frame_changed = off_frame || scale_changed;
+
         if frame_changed {
             self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
@@ -420,36 +427,30 @@ impl MandelTexture {
         });
 
         self.tiles.iter().for_each(|tile| {
-            let mut tile_state_mutex = tile.state.lock().unwrap();
-            let tile_state = &mut *tile_state_mutex;
-
-            if frame_changed {
-                tile.cancel_token
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if let TileState::Computing { task_handle } = tile_state {
-                    task_handle.abort();
-                }
-                *tile_state = TileState::Idle;
-            }
+            let tile_state = &mut *tile.state.lock().unwrap();
 
             let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
-            if !frame_rect.intersects(&tile_rect) {
+            let is_in_view = frame_rect.intersects(&tile_rect);
+
+            if frame_changed || !is_in_view {
+                // cancel tile
                 if let TileState::Computing { task_handle } = tile_state {
                     tile.cancel_token
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     task_handle.abort();
                     *tile_state = TileState::Idle;
                 }
+            }
+            if !is_in_view || matches!(tile_state, TileState::Computing { .. }) {
+                // when panning, tile could be already in progress
+                // or
+                // not in view, skip
                 return;
             }
-
-            if !matches!(tile_state, TileState::Idle) {
-                // happens when panning, tile could be already in progress
-                return;
-            }
+            *tile_state = TileState::Idle;
 
             let img_size = self.texture_size;
-            let tile_rect = tile.tex_rect;
+            let tex_rect = tile.tex_rect;
             let tile_index = tile.index;
 
             let callback = tile_ready_callback.clone();
@@ -458,28 +459,33 @@ impl MandelTexture {
             let cancel_token_value = cancel_token.load(std::sync::atomic::Ordering::Relaxed);
             let semaphore = self.semaphore.clone();
 
-            let mut buffer = self.buf_pool.take();
+            let buffer = self.buf_pool.take();
 
             let task_handle = self.runtime.spawn(async move {
-                let _ = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.unwrap();
 
-                let pixel_buf: &mut [Pixel] = bytemuck::cast_slice_mut(&mut buffer);
-                let result = mandelbrot_simd(
-                    img_size,
-                    tile_rect,
-                    -fractal_rect.center(),
-                    1.0 / fractal_rect.size.y,
-                    max_iters,
-                    cancel_token,
-                    cancel_token_value,
-                    pixel_buf,
-                )
-                .await;
+                let result = {
+                    let buffer = &mut *buffer.lock().unwrap();
+                    let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
+                    mandelbrot_simd(
+                        img_size,
+                        tex_rect,
+                        -fractal_rect.center(),
+                        1.0 / fractal_rect.size.y,
+                        max_iters,
+                        cancel_token,
+                        cancel_token_value,
+                        buffer,
+                    )
+                };
+
+                let mut tile_state = tile_state_clone.lock().unwrap();
                 if result.is_ok() {
-                    let mut tile_state = tile_state_clone.lock().unwrap();
                     *tile_state = TileState::WaitForUpload { buffer };
                     (callback)(tile_index);
+                } else {
+                    *tile_state = TileState::Idle;
                 }
             });
 
@@ -551,13 +557,14 @@ impl MandelTexture {
         self.tiles.iter().for_each(|tile| {
             let mut tile_state = tile.state.lock().unwrap();
             if let TileState::WaitForUpload { .. } = *tile_state {
-                let mut ready = TileState::Ready;
+                let mut ready = TileState::Idle;
                 swap(&mut ready, &mut *tile_state);
 
                 let TileState::WaitForUpload { buffer } = ready else {
                     panic!();
                 };
-
+                let buffer = buffer.lock().unwrap();
+                let buffer = buffer.as_slice();
                 render_info.queue.write_texture(
                     wgpu::ImageCopyTexture {
                         texture: &self.texture1,
@@ -569,7 +576,7 @@ impl MandelTexture {
                         },
                         aspect: wgpu::TextureAspect::All,
                     },
-                    bytemuck::cast_slice(&buffer),
+                    buffer,
                     wgpu::ImageDataLayout {
                         offset: 0,
                         bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
@@ -581,7 +588,6 @@ impl MandelTexture {
                         depth_or_array_layers: 1,
                     },
                 );
-                self.buf_pool.release(buffer);
             }
         });
     }
@@ -597,6 +603,10 @@ impl MandelTexture {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
+            let mut pc = PushConst::new();
+            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
+                * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
+
             let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -611,16 +621,9 @@ impl MandelTexture {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-
             render_pass.set_pipeline(&self.screen_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
-
-            let mut pc = PushConst::new();
-            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
-                * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
-
             render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
-
             render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }

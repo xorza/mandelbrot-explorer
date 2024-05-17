@@ -38,9 +38,9 @@ const CX_INIT: [f64; SIMD_LANE_COUNT] = {
 };
 
 //noinspection RsConstantConditionIf
-pub async fn mandelbrot_simd(
+pub fn mandelbrot_simd(
     image_size: u32,
-    tile_rect: URect,
+    tex_rect: URect,
     fractal_offset: DVec2,
     fractal_scale: f64,
     max_iterations: u32,
@@ -48,7 +48,7 @@ pub async fn mandelbrot_simd(
     cancel_token_value: u32,
     buffer: &mut [Pixel],
 ) -> anyhow::Result<()> {
-    assert_eq!(buffer.len(), (tile_rect.size.x * tile_rect.size.y) as usize);
+    assert_eq!(buffer.len(), (tex_rect.size.x * tex_rect.size.y) as usize);
 
     let now = Instant::now();
     let buffer_frame = {
@@ -56,14 +56,14 @@ pub async fn mandelbrot_simd(
         let fractal_offset = DVec2::new(fractal_offset.x, fractal_offset.y);
 
         DRect::from_pos_size(
-            (DVec2::from(tile_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
-            (DVec2::from(tile_rect.size) / image_size) / fractal_scale,
+            (DVec2::from(tex_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
+            (DVec2::from(tex_rect.size) / image_size) / fractal_scale,
         )
     };
 
     {
-        for y in 0..tile_rect.size.y {
-            for x in 0..tile_rect.size.x / SIMD_LANE_COUNT as u32 {
+        for y in 0..tex_rect.size.y {
+            for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
                 if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
                     if cancel_token.load(std::sync::atomic::Ordering::Relaxed) != cancel_token_value
                     {
@@ -73,15 +73,15 @@ pub async fn mandelbrot_simd(
 
                 let cx = f64simd::from_slice(CX_INIT.as_slice())
                     + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
-                let cx = cx * f64simd::splat(buffer_frame.size.x / tile_rect.size.x as f64);
+                let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
                 let cx = cx + f64simd::splat(buffer_frame.pos.x);
 
                 let cy = f64simd::splat(
-                    buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tile_rect.size.y as f64),
+                    buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tex_rect.size.y as f64),
                 );
 
                 let values_simd = pixel(max_iterations, cx, cy);
-                let idx = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+                let idx = (y * tex_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
                 buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
             }
         }
@@ -90,7 +90,7 @@ pub async fn mandelbrot_simd(
     if is_test_build() {
         let elapsed = now.elapsed();
         println!("Elapsed: {}ms", elapsed.as_millis());
-        println!("Total pixels: {}", tile_rect.size.x * tile_rect.size.y);
+        println!("Total pixels: {}", tex_rect.size.x * tex_rect.size.y);
 
         // let target = Duration::from_millis(100);
         // if elapsed < target {

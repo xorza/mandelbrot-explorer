@@ -47,7 +47,8 @@ struct AppState<'window> {
 
     is_redrawing: bool,
     is_resizing: bool,
-    has_render_error_scope: bool,
+    is_redraw_requested: bool,
+
     mouse_position: Option<UVec2>,
 }
 
@@ -67,7 +68,7 @@ fn main() {
         fractal_app: None,
         is_redrawing: false,
         is_resizing: false,
-        has_render_error_scope: false,
+        is_redraw_requested: true,
         start: Instant::now(),
         mouse_position: None,
         event_loop_proxy: event_loop.create_proxy(),
@@ -151,8 +152,6 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             window_state,
             self.event_loop_proxy.clone(),
         ));
-
-        window.request_redraw();
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEventType) {
@@ -179,16 +178,13 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         }
 
         if self.mouse_position.is_none() {
-            match event {
-                winit::event::WindowEvent::CursorMoved { position, .. } => {
-                    let position = UVec2::new(position.x as u32, position.y as u32);
-                    self.mouse_position = Some(position);
-                }
-                _ => {}
+            if let winit::event::WindowEvent::CursorMoved { position, .. } = event {
+                let position = UVec2::new(position.x as u32, position.y as u32);
+                self.mouse_position = Some(position);
             }
         }
 
-        let result: EventResult = match event {
+        let event_result = match event {
             winit::event::WindowEvent::Resized(_)
             | winit::event::WindowEvent::ScaleFactorChanged { .. } => {
                 let window_state = self.window.as_mut().unwrap();
@@ -206,45 +202,9 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
                     .unwrap()
                     .update(Event::Resized(window_size))
             }
+
             winit::event::WindowEvent::RedrawRequested => {
-                let window_state = self.window.as_mut().unwrap();
-
-                self.is_redrawing = true;
-
-                let surface_texture = match window_state.surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => {
-                        window_state
-                            .surface
-                            .configure(&window_state.device, &window_state.surface_config);
-                        window_state
-                            .surface
-                            .get_current_texture()
-                            .expect("Failed to acquire next surface texture.")
-                    }
-                };
-                let surface_texture_view =
-                    surface_texture
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor {
-                            format: Some(window_state.surface_config.format),
-                            ..wgpu::TextureViewDescriptor::default()
-                        });
-
-                assert!(!self.has_render_error_scope);
-                window_state
-                    .device
-                    .push_error_scope(wgpu::ErrorFilter::Validation);
-                self.has_render_error_scope = true;
-
-                self.fractal_app.as_mut().unwrap().render(&RenderContext {
-                    device: &window_state.device,
-                    queue: &window_state.queue,
-                    view: &surface_texture_view,
-                    time: self.start.elapsed().as_secs_f64(),
-                });
-
-                surface_texture.present();
+                self.is_redraw_requested = true;
 
                 EventResult::Continue
             }
@@ -261,7 +221,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             }
         };
 
-        self.process_event_result(event_loop, result);
+        self.process_event_result(event_loop, event_result);
     }
 
     fn device_event(
@@ -273,57 +233,31 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         let _ = (event_loop, device_id, event);
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             return;
         }
 
-        let mut results: [EventResult; 2] = [EventResult::Continue, EventResult::Continue];
-
         if self.is_redrawing {
             self.is_redrawing = false;
-            if self.has_render_error_scope {
-                self.has_render_error_scope = false;
 
-                let window_state = self.window.as_ref().unwrap();
-                if let Some(error) = window_state.device.pop_error_scope().block_on() {
-                    panic!("Device error: {:?}", error);
-                }
+            let window_state = self.window.as_ref().unwrap();
+            if let Some(error) = window_state.device.pop_error_scope().block_on() {
+                panic!("Device error: {:?}", error);
             }
 
-            results[0] = self
+            let result = self
                 .fractal_app
                 .as_mut()
                 .unwrap()
                 .update(Event::RedrawFinished);
+            self.process_event_result(event_loop, result);
         }
 
-        if self.is_resizing {
-            self.is_resizing = false;
+        let result = self.finish_resizing();
+        self.process_event_result(event_loop, result);
 
-            let window_size = self.window.as_ref().unwrap().window.inner_size();
-
-            results[1] = self
-                .fractal_app
-                .as_mut()
-                .unwrap()
-                .update(Event::Resized(UVec2::new(
-                    window_size.width,
-                    window_size.height,
-                )));
-        }
-
-        if results
-            .iter()
-            .any(|result| matches!(result, EventResult::Exit))
-        {
-            _event_loop.exit();
-        } else if results
-            .iter()
-            .any(|result| matches!(result, EventResult::Redraw))
-        {
-            self.window.as_ref().unwrap().window.request_redraw();
-        }
+        self.redraw_if_needed();
     }
 
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
@@ -347,11 +281,73 @@ impl<'a> AppState<'_> {
             EventResult::Continue => {}
 
             EventResult::Redraw => {
-                self.window.as_ref().unwrap().window.request_redraw();
+                self.is_redraw_requested = true;
             }
             EventResult::Exit => {
+                self.is_redraw_requested = false;
                 event_loop.exit();
             }
+        }
+    }
+
+    fn redraw_if_needed(&mut self) {
+        if !self.is_redraw_requested {
+            return;
+        }
+
+        let window_state = self.window.as_mut().unwrap();
+
+        self.is_redrawing = true;
+
+        let surface_texture = match window_state.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(_) => {
+                window_state
+                    .surface
+                    .configure(&window_state.device, &window_state.surface_config);
+                window_state
+                    .surface
+                    .get_current_texture()
+                    .expect("Failed to acquire next surface texture.")
+            }
+        };
+        let surface_texture_view =
+            surface_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    format: Some(window_state.surface_config.format),
+                    ..wgpu::TextureViewDescriptor::default()
+                });
+
+        window_state
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+
+        self.fractal_app.as_mut().unwrap().render(&RenderContext {
+            device: &window_state.device,
+            queue: &window_state.queue,
+            view: &surface_texture_view,
+            time: self.start.elapsed().as_secs_f64(),
+        });
+
+        surface_texture.present();
+    }
+
+    fn finish_resizing(&mut self) -> EventResult {
+        if self.is_resizing {
+            self.is_resizing = false;
+
+            let window_size = self.window.as_ref().unwrap().window.inner_size();
+
+            self.fractal_app
+                .as_mut()
+                .unwrap()
+                .update(Event::Resized(UVec2::new(
+                    window_size.width,
+                    window_size.height,
+                )))
+        } else {
+            EventResult::Continue
         }
     }
 }
