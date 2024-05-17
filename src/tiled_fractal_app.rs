@@ -54,7 +54,7 @@ impl TiledFractalApp {
         );
 
         let aspect = DVec2::new(window_size.x as f64 / window_size.y as f64, 1.0);
-        let frame_rect = DRect::from_center_size(DVec2::zeroed(), aspect * 2.5);
+        let frame_rect = DRect::from_center_size(DVec2::new(-0.74, 0.0), aspect * 2.5);
 
         let mut result = Self {
             window_size,
