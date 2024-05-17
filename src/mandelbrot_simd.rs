@@ -135,7 +135,6 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
 #[cfg(test)]
 mod test {
     use glam::UVec2;
-    use pollster::FutureExt;
 
     use crate::env::is_debug_build;
 
@@ -151,56 +150,36 @@ mod test {
         let fractal_scale = 75.475169471081102;
         let max_iterations = 1024;
         let cancel_token = Arc::new(AtomicBool::new(false));
-        let cancel_token_value = 0;
         let mut buffer = vec![Pixel::default(); (image_size * image_size) as usize];
 
+        let now = Instant::now();
+
         if !is_debug_build() {
-            let cancel_token = cancel_token.clone();
-            mandelbrot_simd(
-                image_size,
-                tile_rect,
-                fractal_offset,
-                fractal_scale,
-                max_iterations,
-                cancel_token,
-                &mut buffer,
-            )
-            .block_on()
-            .unwrap();
+            for _i in 0..4 {
+                let cancel_token = cancel_token.clone();
+                mandelbrot_simd(
+                    image_size,
+                    tile_rect,
+                    fractal_offset,
+                    fractal_scale,
+                    max_iterations,
+                    cancel_token,
+                    &mut buffer,
+                )
+                .unwrap();
+            }
         }
 
-        let now = std::time::Instant::now();
-
-        let buffer = {
-            if !is_debug_build() {
-                for _i in 0..4 {
-                    let cancel_token = cancel_token.clone();
-                    mandelbrot_simd(
-                        image_size,
-                        tile_rect,
-                        fractal_offset,
-                        fractal_scale,
-                        max_iterations,
-                        cancel_token,
-                        &mut buffer,
-                    )
-                    .block_on()
-                    .unwrap();
-                }
-            }
-
-            mandelbrot_simd(
-                image_size,
-                tile_rect,
-                fractal_offset,
-                fractal_scale,
-                max_iterations,
-                cancel_token,
-                &mut buffer,
-            )
-            .block_on()
-            .unwrap()
-        };
+        mandelbrot_simd(
+            image_size,
+            tile_rect,
+            fractal_offset,
+            fractal_scale,
+            max_iterations,
+            cancel_token,
+            &mut buffer,
+        )
+        .unwrap();
 
         if is_debug_build() {
             let elapsed = now.elapsed().as_millis();
