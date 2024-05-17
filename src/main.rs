@@ -112,11 +112,13 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         }
         .using_resolution(adapter.limits());
 
+        let features = wgpu::Features::PUSH_CONSTANTS | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
-                    required_features: wgpu::Features::PUSH_CONSTANTS,
+                    required_features: features,
                     required_limits: limits,
                 },
                 None,

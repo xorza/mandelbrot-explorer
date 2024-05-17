@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
-use glam::Mat4;
+use glam::{Mat4, UVec2, Vec2};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -18,6 +18,8 @@ pub struct ScreenRect([Vert; 4]);
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct PushConst {
     pub proj_mat: Mat4,
+    pub texture_size: Vec2,
+    _padding: Vec2,
 }
 
 impl Default for ScreenRect {
@@ -57,12 +59,37 @@ impl ScreenRect {
     pub fn as_bytes(&self) -> &[u8] {
         bytemuck::bytes_of(&self.0)
     }
+
+    pub fn with_texture_size(size: UVec2) -> Self {
+        ScreenRect([
+            // @formatter:off
+            Vert {
+                pos: [-1.0, -1.0, 0.0, 1.0],
+                uw: [0.0, 0.0],
+            },
+            Vert {
+                pos: [-1.0, 1.0, 0.0, 1.0],
+                uw: [0.0, size.y as f32],
+            },
+            Vert {
+                pos: [1.0, -1.0, 0.0, 1.0],
+                uw: [size.x as f32, 0.0],
+            },
+            Vert {
+                pos: [1.0, 1.0, 0.0, 1.0],
+                uw: [size.x as f32, size.y as f32],
+            },
+            // @formatter:on
+        ])
+    }
 }
 
 impl PushConst {
     pub fn new() -> Self {
         Self {
             proj_mat: Mat4::default(),
+            texture_size: Vec2::default(),
+            _padding: Vec2::default(),
         }
     }
     pub fn as_bytes(&self) -> &[u8] {

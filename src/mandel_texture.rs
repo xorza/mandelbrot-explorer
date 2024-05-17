@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::mem::swap;
+use std::mem::{size_of, swap};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
-use crate::mandelbrot_simd::{mandelbrot_simd, MAX_ITER};
+use crate::mandelbrot_simd::{mandelbrot_simd, Pixel, MAX_ITER};
 use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
 use crate::RenderContext;
@@ -21,7 +21,7 @@ const TEXTURE_SIZE: u32 = 4 * 1024;
 pub enum TileState {
     Idle,
     Computing { task_handle: JoinHandle<()> },
-    WaitForUpload { buffer: Vec<u8> },
+    WaitForUpload { buffer: Vec<Pixel> },
     Ready,
 }
 
@@ -63,6 +63,13 @@ pub struct MandelTexture {
     pub sampler: wgpu::Sampler,
 }
 
+fn calc_max_iters(fractal_rect: DRect) -> u32 {
+    let max_iterations =
+        (1000 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32).min(MAX_ITER);
+    // println!("max_iterations: {}", max_iterations);
+    max_iterations
+}
+
 impl MandelTexture {
     pub fn new(
         device: &wgpu::Device,
@@ -84,7 +91,7 @@ impl MandelTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
+            format: wgpu::TextureFormat::R16Uint,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_DST,
@@ -98,7 +105,7 @@ impl MandelTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
+            format: wgpu::TextureFormat::R16Uint,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_DST,
@@ -147,7 +154,7 @@ impl MandelTexture {
             ],
         }];
         let screen_rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: ScreenRect::default().as_bytes(),
+            contents: ScreenRect::with_texture_size(UVec2::splat(texture_size)).as_bytes(),
             usage: wgpu::BufferUsages::VERTEX,
             label: None,
         });
@@ -156,8 +163,8 @@ impl MandelTexture {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             border_color: None,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
 
@@ -178,6 +185,7 @@ impl MandelTexture {
         let palette_view = palette_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let img = image::open("palette.png").unwrap();
+        let img = img.into_rgba8();
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &palette_texture,
@@ -185,7 +193,7 @@ impl MandelTexture {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &img.as_bytes(),
+            &img.as_raw(),
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(256 * 4),
@@ -211,7 +219,7 @@ impl MandelTexture {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Uint,
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -292,7 +300,7 @@ impl MandelTexture {
                 module: &blit_shader,
                 entry_point: "fs_main",
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::TextureFormat::R8Unorm.into())],
+                targets: &[Some(wgpu::TextureFormat::R16Uint.into())],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
@@ -392,9 +400,7 @@ impl MandelTexture {
         }
 
         let fractal_rect = self.fractal_rect;
-        let max_iterations =
-            (300 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32).min(MAX_ITER);
-        // println!("max_iterations: {}", max_iterations);
+        let max_iters = calc_max_iters(fractal_rect);
 
         self.tiles.sort_unstable_by(|a, b| {
             let a_center = a.fractal_rect(self.texture_size, fractal_rect).center();
@@ -431,6 +437,7 @@ impl MandelTexture {
             }
 
             if !matches!(tile_state, TileState::Idle) {
+                // happens when panning, tile could be already in progress
                 return;
             }
 
@@ -451,7 +458,7 @@ impl MandelTexture {
                     tile_rect,
                     -fractal_rect.center(),
                     1.0 / fractal_rect.size.y,
-                    max_iterations,
+                    max_iters,
                     cancel_token,
                     cancel_token_value,
                 )
@@ -511,6 +518,7 @@ impl MandelTexture {
             let mut pc = PushConst::new();
             pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
                 * Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0));
+            pc.texture_size = Vec2::splat(self.texture_size as f32);
 
             render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
 
@@ -530,12 +538,12 @@ impl MandelTexture {
 
     fn upload_tiles(&self, render_info: &RenderContext) {
         self.tiles.iter().for_each(|tile| {
-            let mut buff: Option<Vec<u8>> = None;
+            let mut buff: Option<Vec<Pixel>> = None;
 
             {
                 let mut tile_state = tile.state.lock().unwrap();
                 if let TileState::WaitForUpload { buffer } = &mut *tile_state {
-                    let mut new_buff: Vec<u8> = Vec::new();
+                    let mut new_buff: Vec<Pixel> = Vec::new();
                     swap(&mut new_buff, buffer);
                     buff = Some(new_buff);
                 }
@@ -558,10 +566,10 @@ impl MandelTexture {
                     },
                     aspect: wgpu::TextureAspect::All,
                 },
-                &buff,
+                bytemuck::cast_slice(&buff),
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(tile.tex_rect.size.x),
+                    bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
                     rows_per_image: Some(tile.tex_rect.size.y),
                 },
                 wgpu::Extent3d {

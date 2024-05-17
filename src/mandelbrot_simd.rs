@@ -7,19 +7,37 @@ use std::time::Instant;
 use std::usize;
 
 use anyhow::anyhow;
+use bytemuck::{Pod, Zeroable};
 use glam::DVec2;
 
 use crate::env::is_test_build;
 use crate::math::{DRect, URect};
 
-const MULTISAMPLE_THRESHOLD: u8 = 64;
+const MULTISAMPLE_THRESHOLD: u16 = 64;
 const SIMD_LANE_COUNT: usize = 8;
 pub const MAX_ITER: u32 = 4500;
+const MULTISAMPLE_ENABLED: bool = false;
 
 type f64simd = Simd<f64, SIMD_LANE_COUNT>;
 type i64simd = Simd<i64, SIMD_LANE_COUNT>;
 type mask64simd = Mask<i64, SIMD_LANE_COUNT>;
-type CountSimd = [u8; SIMD_LANE_COUNT];
+type CountSimd = [Pixel; SIMD_LANE_COUNT];
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable, Default)]
+pub(crate) struct Pixel {
+    r: u16,
+}
+
+const CX_INIT: [f64; SIMD_LANE_COUNT] = {
+    let mut r = [0.0; SIMD_LANE_COUNT];
+    let mut i = 0;
+    while i < SIMD_LANE_COUNT {
+        r[i] = i as f64;
+        i += 1;
+    }
+    r
+};
 
 //noinspection RsConstantConditionIf
 pub async fn mandelbrot_simd(
@@ -30,10 +48,11 @@ pub async fn mandelbrot_simd(
     max_iterations: u32,
     cancel_token: Arc<AtomicU32>,
     cancel_token_value: u32,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Vec<Pixel>> {
     let now = Instant::now();
 
-    let mut buffer: Vec<u8> = vec![128; (tile_rect.size.x * tile_rect.size.y) as usize];
+    let mut buffer: Vec<Pixel> =
+        vec![Pixel::default(); (2 * tile_rect.size.x * tile_rect.size.y) as usize];
 
     let buffer_frame = {
         let image_size = image_size as f64;
@@ -45,7 +64,7 @@ pub async fn mandelbrot_simd(
         )
     };
 
-    let sample_offsets = {
+    let sample_offsets: [DVec2; 4] = {
         let pixel_size = 1.0 / (fractal_scale * image_size as f64);
         let sample_offset = 0.5 * pixel_size;
 
@@ -59,7 +78,6 @@ pub async fn mandelbrot_simd(
 
     {
         // main buffer
-        let x_init = (0..SIMD_LANE_COUNT).map(|i| i as f64).collect::<Vec<f64>>();
 
         for y in 0..tile_rect.size.y {
             for x in 0..tile_rect.size.x / SIMD_LANE_COUNT as u32 {
@@ -70,7 +88,7 @@ pub async fn mandelbrot_simd(
                     }
                 }
 
-                let cx = f64simd::from_slice(x_init.as_slice())
+                let cx = f64simd::from_slice(CX_INIT.as_slice())
                     + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
                 let cx = cx * f64simd::splat(buffer_frame.size.x / tile_rect.size.x as f64);
                 let cx = cx + f64simd::splat(buffer_frame.pos.x);
@@ -80,41 +98,42 @@ pub async fn mandelbrot_simd(
                 );
 
                 let values_simd = pixel(max_iterations, cx, cy);
-
-                let index = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
-                buffer[index..index + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
+                let start_index = (y * tile_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+                buffer[start_index..start_index + SIMD_LANE_COUNT]
+                    .copy_from_slice(values_simd.as_slice());
             }
         }
     }
 
     let mut multisampled_pixels_count: usize = 0;
 
-    {
+    if MULTISAMPLE_ENABLED {
         // multisample
         let mut cx_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
         let mut cy_load: Vec<f64> = Vec::with_capacity(SIMD_LANE_COUNT);
+        // let mut loaded_cnt = 0;
         let mut loaded_indexes: Vec<usize> = Vec::with_capacity(SIMD_LANE_COUNT);
 
-        let mut acc_index = usize::MAX;
+        let mut acc_index: usize = usize::MAX;
         let mut acc_value: u16 = 0;
 
         for y in 0..tile_rect.size.y {
             for x in 0..tile_rect.size.x {
                 let index = (y * tile_rect.size.x + x) as usize;
                 let should_multisample = {
-                    let value = buffer[index];
+                    let value = buffer[index].r;
 
                     (x != tile_rect.size.x - 1
-                        && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize])
+                        && value.abs_diff(buffer[(y * tile_rect.size.x + x + 1) as usize].r)
                             > MULTISAMPLE_THRESHOLD)
                         || (x != 0
-                            && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize])
+                            && value.abs_diff(buffer[(y * tile_rect.size.x + x - 1) as usize].r)
                                 > MULTISAMPLE_THRESHOLD)
                         || (y != tile_rect.size.y - 1
-                            && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize])
+                            && value.abs_diff(buffer[((y + 1) * tile_rect.size.x + x) as usize].r)
                                 > MULTISAMPLE_THRESHOLD)
                         || (y != 0
-                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize])
+                            && value.abs_diff(buffer[((y - 1) * tile_rect.size.x + x) as usize].r)
                                 > MULTISAMPLE_THRESHOLD)
                 };
 
@@ -131,6 +150,7 @@ pub async fn mandelbrot_simd(
                         cx_load.push(xy.x);
                         cy_load.push(xy.y);
                         loaded_indexes.push(index);
+                        // loaded_cnt += 1;
 
                         if cx_load.len() == SIMD_LANE_COUNT {
                             let cx = f64simd::from_slice(cx_load.as_slice());
@@ -140,14 +160,14 @@ pub async fn mandelbrot_simd(
                             for (simd_index, &buffer_index) in loaded_indexes.iter().enumerate() {
                                 if buffer_index != acc_index {
                                     if acc_index != usize::MAX {
-                                        buffer[acc_index] = (acc_value / 4) as u8;
+                                        buffer[acc_index].r = acc_value / 4;
                                     }
 
                                     acc_index = buffer_index;
-                                    acc_value = buffer[acc_index] as u16;
+                                    acc_value = buffer[acc_index].r;
                                 }
 
-                                acc_value += values_simd[simd_index] as u16;
+                                acc_value += values_simd[simd_index].r;
                             }
 
                             cx_load.clear();
@@ -182,13 +202,12 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut cnt = i64simd::splat(0);
     let mut escaped = mask64simd::splat(false);
 
-    let f64_4_0 = f64simd::splat(4.0);
+    let f64_4_0 = f64simd::splat(5.0);
     let i64_0 = i64simd::splat(0);
     let i64_1 = i64simd::splat(1);
 
     for _ in 0..max_iterations {
         (zx, zy) = (zx * zx - zy * zy + cx, zx * zy + zx * zy + cy);
-
         escaped |= (zx * zx + zy * zy).simd_ge(f64_4_0);
 
         if escaped.all() {
@@ -198,11 +217,13 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
         cnt += escaped.select(i64_0, i64_1);
     }
 
-    cnt.as_array().map(|v| {
-        if v == max_iterations as i64 {
-            0
+    cnt.as_array().map(|iters| {
+        if iters as u32 == max_iterations {
+            Pixel { r: 0 }
         } else {
-            (v % 256) as u8
+            Pixel {
+                r: 1 + (iters % u16::MAX as i64) as u16,
+            }
         }
     })
 }
@@ -301,8 +322,8 @@ mod test {
         for y in 0..image_size {
             for x in 0..image_size {
                 let index = (y * image_size + x) as usize;
-                let color = buffer[index];
-                let color = image::Rgb([color, color, color]);
+                let pixel = (buffer[index].r % 256) as u8;
+                let color = image::Rgb([pixel, pixel, pixel]);
                 image.put_pixel(x, y, color);
             }
         }
