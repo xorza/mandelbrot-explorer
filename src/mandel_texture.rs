@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
-use crate::mandelbrot_simd::mandelbrot_simd;
+use crate::mandelbrot_simd::{mandelbrot_simd, MAX_ITER};
 use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
 use crate::RenderContext;
@@ -353,7 +353,7 @@ impl MandelTexture {
             semaphore,
 
             texture_size,
-            max_iter: 100,
+            max_iter: 255,
             tiles,
 
             frame_rect: DRect::zeroed(),
@@ -393,7 +393,7 @@ impl MandelTexture {
 
         let fractal_rect = self.fractal_rect;
         let max_iterations =
-            300 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32;
+            (300 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32).min(MAX_ITER);
         // println!("max_iterations: {}", max_iterations);
 
         self.tiles.sort_unstable_by(|a, b| {

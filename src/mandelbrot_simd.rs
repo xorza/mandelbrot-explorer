@@ -14,6 +14,7 @@ use crate::math::{DRect, URect};
 
 const MULTISAMPLE_THRESHOLD: u8 = 64;
 const SIMD_LANE_COUNT: usize = 8;
+pub const MAX_ITER: u32 = 4500;
 
 type f64simd = Simd<f64, SIMD_LANE_COUNT>;
 type i64simd = Simd<i64, SIMD_LANE_COUNT>;
