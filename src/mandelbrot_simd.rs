@@ -129,16 +129,14 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
 
 #[cfg(test)]
 mod test {
-    use glam::UVec2;
+    use std::sync::Arc;
 
-    use crate::env::is_debug_build;
+    use glam::UVec2;
 
     use super::*;
 
     #[test]
     fn draw_mandelbrot() {
-        use std::sync::Arc;
-
         let image_size = 2048;
         let tile_rect = URect::from_pos_size(UVec2::new(0, 0), UVec2::new(image_size, image_size));
         let fractal_offset = DVec2::new(0.10486747136388758, 0.9244368813525663);
@@ -147,42 +145,24 @@ mod test {
         let cancel_token = Arc::new(AtomicBool::new(false));
         let mut buffer = vec![Pixel::default(); (image_size * image_size) as usize];
 
-        let now = Instant::now();
+        let new = Instant::now();
+        let retry = 5;
 
-        if !is_debug_build() {
-            for _i in 0..4 {
-                let cancel_token = cancel_token.clone();
-                mandelbrot_simd(
-                    image_size,
-                    tile_rect,
-                    fractal_offset,
-                    fractal_scale,
-                    max_iterations,
-                    cancel_token,
-                    &mut buffer,
-                )
-                .unwrap();
-            }
+        for _ in 0..retry {
+            mandelbrot_simd(
+                image_size,
+                tile_rect,
+                fractal_offset,
+                fractal_scale,
+                max_iterations,
+                cancel_token.clone(),
+                &mut buffer,
+            )
+            .unwrap();
         }
 
-        mandelbrot_simd(
-            image_size,
-            tile_rect,
-            fractal_offset,
-            fractal_scale,
-            max_iterations,
-            cancel_token,
-            &mut buffer,
-        )
-        .unwrap();
-
-        if is_debug_build() {
-            let elapsed = now.elapsed().as_millis();
-            println!("DEBUG Avg elapsed: {}ms", elapsed);
-        } else {
-            let elapsed = now.elapsed().as_millis() / 5;
-            println!("Avg elapsed: {}ms", elapsed);
-        }
+        let elapsed = new.elapsed();
+        println!("Avg elapsed: {}ms", elapsed.as_millis() / retry);
 
         let mut image = image::ImageBuffer::new(image_size, image_size);
         for y in 0..image_size {

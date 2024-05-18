@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(test)]
 #![allow(dead_code)]
 
 use std::sync::Arc;
@@ -107,6 +108,8 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             .block_on()
             .expect("No suitable GPU adapters found on the system.");
 
+        dbg!(adapter.get_info());
+
         // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
         let limits = Limits {
             max_push_constant_size: 256,
@@ -127,8 +130,6 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             )
             .block_on()
             .expect("Unable to find a suitable GPU adapter.");
-
-        dbg!(adapter.get_info());
 
         let window_size = window.inner_size();
         let mut surface_config = surface
@@ -241,8 +242,14 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         if self.is_redrawing {
             self.is_redrawing = false;
 
-            let window_state = self.window.as_ref().unwrap();
-            if let Some(error) = window_state.device.pop_error_scope().block_on() {
+            let error = self
+                .window
+                .as_ref()
+                .unwrap()
+                .device
+                .pop_error_scope()
+                .block_on();
+            if let Some(error) = error {
                 panic!("Device error: {:?}", error);
             }
 
