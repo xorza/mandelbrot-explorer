@@ -60,28 +60,23 @@ pub fn mandelbrot_simd(
         )
     };
 
-    {
-        for y in 0..tex_rect.size.y {
-            for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
-                if (x * SIMD_LANE_COUNT as u32) % 32 == 0 {
-                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                        return Err(anyhow!("Cancelled"));
-                    }
-                }
+    for y in 0..tex_rect.size.y {
+        if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(anyhow!("Cancelled"));
+        }
+        for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
+            let cx = f64simd::from_slice(CX_INIT.as_slice())
+                + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
+            let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
+            let cx = cx + f64simd::splat(buffer_frame.pos.x);
 
-                let cx = f64simd::from_slice(CX_INIT.as_slice())
-                    + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
-                let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
-                let cx = cx + f64simd::splat(buffer_frame.pos.x);
+            let cy = f64simd::splat(
+                buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tex_rect.size.y as f64),
+            );
 
-                let cy = f64simd::splat(
-                    buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tex_rect.size.y as f64),
-                );
-
-                let values_simd = pixel(max_iterations, cx, cy);
-                let idx = (y * tex_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
-                buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
-            }
+            let values_simd = pixel(max_iterations, cx, cy);
+            let idx = (y * tex_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+            buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
         }
     }
 
