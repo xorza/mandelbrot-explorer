@@ -1,10 +1,11 @@
 use std::borrow::Cow;
 use std::mem::{size_of, swap};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytemuck::Zeroable;
 use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
+use parking_lot::Mutex;
 use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -428,7 +429,7 @@ impl MandelTexture {
         });
 
         self.tiles.iter_mut().for_each(|tile| {
-            let mut tile_state = tile.state.lock().unwrap();
+            let mut tile_state = tile.state.lock();
 
             let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
             let tile_in_view = frame_rect.intersects(&tile_rect);
@@ -464,7 +465,7 @@ impl MandelTexture {
                 let _permit = semaphore.acquire().await.unwrap();
 
                 let compute_ok = {
-                    let buffer = &mut *buffer.lock().unwrap();
+                    let buffer = &mut *buffer.lock();
                     let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
                     mandelbrot_simd(
@@ -479,7 +480,7 @@ impl MandelTexture {
                     .is_ok()
                 };
 
-                let mut tile_state = tile_state_clone.lock().unwrap();
+                let mut tile_state = tile_state_clone.lock();
                 if compute_ok {
                     *tile_state = TileState::WaitForUpload { buffer };
                     (callback)(tile_index);
@@ -555,7 +556,7 @@ impl MandelTexture {
 
     fn upload_tiles(&mut self, render_info: &RenderContext) {
         self.tiles.iter().for_each(|tile| {
-            let mut tile_state = tile.state.lock().unwrap();
+            let mut tile_state = tile.state.lock();
             if let TileState::WaitForUpload { .. } = *tile_state {
                 let mut ready = TileState::Idle;
                 swap(&mut ready, &mut *tile_state);
@@ -563,7 +564,7 @@ impl MandelTexture {
                 let TileState::WaitForUpload { buffer } = ready else {
                     panic!();
                 };
-                let buffer = buffer.lock().unwrap();
+                let buffer = buffer.lock();
                 let buffer = buffer.as_slice();
                 render_info.queue.write_texture(
                     wgpu::ImageCopyTexture {

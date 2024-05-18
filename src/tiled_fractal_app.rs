@@ -1,9 +1,10 @@
 #![allow(unused_parens)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytemuck::Zeroable;
 use glam::{DVec2, IVec2, UVec2};
+use parking_lot::Mutex;
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
@@ -194,7 +195,6 @@ impl TiledFractalApp {
             .update(self.frame_rect, focus, move |index| {
                 event_loop_proxy
                     .lock()
-                    .unwrap()
                     .send_event(UserEvent::TileReady { tile_index: index })
                     .unwrap();
             });
