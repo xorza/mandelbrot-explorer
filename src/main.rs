@@ -239,28 +239,6 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
             return;
         }
 
-        if self.is_redrawing {
-            self.is_redrawing = false;
-
-            let error = self
-                .window
-                .as_ref()
-                .unwrap()
-                .device
-                .pop_error_scope()
-                .block_on();
-            if let Some(error) = error {
-                panic!("Device error: {:?}", error);
-            }
-
-            let result = self
-                .fractal_app
-                .as_mut()
-                .unwrap()
-                .update(Event::RedrawFinished);
-            self.process_event_result(event_loop, result);
-        }
-
         let result = self.finish_resizing();
         self.process_event_result(event_loop, result);
 
@@ -298,6 +276,20 @@ impl<'a> AppState<'_> {
     }
 
     fn redraw_if_needed(&mut self) {
+        if self.is_redrawing {
+            let error = self
+                .window
+                .as_ref()
+                .unwrap()
+                .device
+                .pop_error_scope()
+                .block_on();
+            if let Some(error) = error {
+                panic!("Device error: {:?}", error);
+            }
+        }
+        self.is_redrawing = false;
+
         if !self.is_redraw_requested {
             return;
         }
