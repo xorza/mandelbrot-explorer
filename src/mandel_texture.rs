@@ -320,6 +320,7 @@ impl MandelTexture {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         });
 
         let screen_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -351,6 +352,7 @@ impl MandelTexture {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         });
 
         let buffer_size = (TILE_SIZE * TILE_SIZE) as usize * size_of::<Pixel>();

@@ -125,6 +125,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
                     label: None,
                     required_features: features,
                     required_limits: limits,
+                    memory_hints: Default::default(),
                 },
                 None,
             )
