@@ -300,13 +300,13 @@ impl MandelTexture {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &blit_shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &blit_shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::TextureFormat::R16Uint.into())],
             }),
@@ -332,13 +332,13 @@ impl MandelTexture {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &screen_shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &vertex_buffers,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &screen_shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(surface_config.view_formats[0].into())],
             }),
