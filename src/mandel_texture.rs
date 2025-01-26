@@ -195,14 +195,14 @@ impl MandelTexture {
         let img = image::open("palette.png").unwrap();
         let img = img.into_rgba8();
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &palette_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &img.as_raw(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256 * 4),
                 rows_per_image: Some(1),
@@ -569,7 +569,7 @@ impl MandelTexture {
                 let buffer = buffer.lock();
                 let buffer = buffer.as_slice();
                 render_info.queue.write_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &self.texture1,
                         mip_level: 0,
                         origin: wgpu::Origin3d {
@@ -580,7 +580,7 @@ impl MandelTexture {
                         aspect: wgpu::TextureAspect::All,
                     },
                     buffer,
-                    wgpu::ImageDataLayout {
+                    wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
                         rows_per_image: Some(tile.tex_rect.size.y),

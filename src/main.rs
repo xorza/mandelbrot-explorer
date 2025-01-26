@@ -88,14 +88,10 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         let window = event_loop.create_window(window_attr).unwrap();
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: Default::default(),
-            dx12_shader_compiler: wgpu::Dx12Compiler::Dxc {
-                dxil_path: None,
-                dxc_path: None,
-            },
-            gles_minor_version: Default::default(),
+            backend_options: Default::default(),
         });
         let surface = instance.create_surface(window.clone()).unwrap();
 
