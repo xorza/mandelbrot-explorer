@@ -11,7 +11,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
-use crate::buffer_pool::BufferPool;
+use crate::buffer_pool::{BufferHandle, BufferPool};
 use crate::mandelbrot_simd::{mandelbrot_simd, Pixel, MAX_ITER};
 use crate::math::{DRect, URect};
 use crate::render_pods::{PushConst, ScreenRect};
@@ -29,7 +29,7 @@ pub enum TileState {
         cancel_token: Arc<AtomicBool>,
     },
     WaitForUpload {
-        buffer: Arc<Mutex<Vec<u8>>>,
+        buffer: Arc<BufferHandle>,
     },
 }
 
