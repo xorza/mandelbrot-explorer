@@ -1,26 +1,34 @@
-# Mandelbrot explorer
+# Mandelbrot Explorer
 
-## Description
-#### MSRV 1.77.2 nightly
-Desktop UI application for exploring the Mandelbrot set. Draggable and zoomable.
-Calculation is done on CPU with 64 bit precision.
-Written on Rust. Uses winit, wgpu, tokio and portable_simd.
-Multithreaded, uses SIMD.
-Preview drag and zoom done on GPU.
+A desktop application for exploring the Mandelbrot set. The project is written in Rust and uses **winit**, **wgpu**, **tokio**, and **portable\_simd** for high performance rendering.
 
-Uses nightly toolchain for SIMD support.
+## Features
 
-Runs pretty smooth on my Macbook Air M2 2022.
-The following single-threaded 2048x2048 image render with 1024 max iterations takes 135ms:
+- Interactive pan and zoom
+- CPU fractal calculations using 64‑bit precision
+- Multithreaded with SIMD acceleration
+- GPU based preview during navigation
 
-![bench.png](/doc/bench.png)
+## Requirements
 
+The project targets the Rust nightly toolchain (tested with nightly 1.77.2) for SIMD support.
 
-## Additional images
-https://youtu.be/W6jAF17scfc
+## Benchmark
+
+Rendering a single‑threaded 2048×2048 image with 1024 iterations takes about 135 ms on a MacBook Air M2 2022.
+
+![Benchmark](doc/bench.png)
+
+## Demo
 
 [![Youtube demo](https://img.youtube.com/vi/W6jAF17scfc/0.jpg)](https://www.youtube.com/watch?v=W6jAF17scfc)
 
-![screenshot1](/doc/Screenshot%202023-08-21%20at%206.23.35%20PM.png)
+Additional screenshots can be found in the `doc/` directory:
 
-![scrennshot2](/doc/Screenshot%202024-05-18%20at%208.45.35%E2%80%AFAM.png)
+![Screenshot 1](doc/Screenshot%202023-08-21%20at%206.23.35%20PM.png)
+
+![Screenshot 2](doc/Screenshot%202024-05-18%20at%208.45.35%E2%80%AFAM.png)
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
