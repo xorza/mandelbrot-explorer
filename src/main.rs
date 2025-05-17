@@ -116,15 +116,13 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
         let features = wgpu::Features::PUSH_CONSTANTS | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: features,
-                    required_limits: limits,
-                    memory_hints: Default::default(),
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: features,
+                required_limits: limits,
+                memory_hints: Default::default(),
+                trace: Default::default(),
+            })
             .block_on()
             .expect("Unable to find a suitable GPU adapter.");
 
