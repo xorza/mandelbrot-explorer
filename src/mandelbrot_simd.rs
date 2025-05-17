@@ -101,7 +101,7 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut cnt = i64simd::splat(0);
     let mut escaped = mask64simd::splat(false);
 
-    let f64_4_0 = f64simd::splat(5.0);
+    let f64_4_0 = f64simd::splat(4.0);
     let i64_0 = i64simd::splat(0);
     let i64_1 = i64simd::splat(1);
 
