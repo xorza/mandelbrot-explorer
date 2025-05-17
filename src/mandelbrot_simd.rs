@@ -65,7 +65,7 @@ pub fn mandelbrot_simd(
             return Err(anyhow!("Cancelled"));
         }
         for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
-            let cx = f64simd::from_slice(CX_INIT.as_slice())
+            let cx = f64simd::from_array(CX_INIT)
                 + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
             let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
             let cx = cx + f64simd::splat(buffer_frame.pos.x);
