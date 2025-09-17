@@ -65,7 +65,7 @@ pub fn mandelbrot_simd(
             return Err(anyhow!("Cancelled"));
         }
         for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
-            let cx = f64simd::from_slice(CX_INIT.as_slice())
+            let cx = f64simd::from_array(CX_INIT)
                 + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
             let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
             let cx = cx + f64simd::splat(buffer_frame.pos.x);
@@ -101,7 +101,7 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut cnt = i64simd::splat(0);
     let mut escaped = mask64simd::splat(false);
 
-    let f64_4_0 = f64simd::splat(5.0);
+    let f64_4_0 = f64simd::splat(4.0);
     let i64_0 = i64simd::splat(0);
     let i64_1 = i64simd::splat(1);
 
