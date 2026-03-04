@@ -190,8 +190,10 @@ impl MandelTexture {
         });
         let palette_view = palette_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let img = image::open("palette.png").expect("Failed to load palette.png");
-        let img = img.into_rgba8();
+        let palette_bytes = include_bytes!("../palette.png");
+        let img = image::load_from_memory(palette_bytes)
+            .expect("Failed to decode embedded palette")
+            .into_rgba8();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &palette_texture,

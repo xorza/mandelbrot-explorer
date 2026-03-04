@@ -12,6 +12,7 @@ pub struct BufferPool {
 #[derive(Debug)]
 struct BufferPoolInner {
     buf_size: usize,
+    max_allocated: usize,
     available: Mutex<Vec<Vec<u8>>>,
     total_allocated: AtomicUsize,
 }
@@ -42,6 +43,7 @@ impl BufferPool {
     pub fn new(buf_size: usize, reserved_count: usize) -> Self {
         let inner = Arc::new(BufferPoolInner {
             buf_size,
+            max_allocated: reserved_count,
             available: Mutex::new(Vec::new()),
             total_allocated: AtomicUsize::new(0),
         });
@@ -59,6 +61,13 @@ impl BufferPool {
 
     pub fn take(&self) -> Arc<BufferHandle> {
         let vec = self.inner.available.lock().pop().unwrap_or_else(|| {
+            let total = self.inner.total_allocated.load(Ordering::Relaxed);
+            assert!(
+                total < self.inner.max_allocated,
+                "Buffer pool exhausted: {} allocated, max {}",
+                total,
+                self.inner.max_allocated
+            );
             let new_total = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed) + 1;
             if cfg!(debug_assertions) {
                 println!("Total allocated buffers: {}", new_total);
