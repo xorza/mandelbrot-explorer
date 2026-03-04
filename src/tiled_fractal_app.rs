@@ -8,12 +8,12 @@ use parking_lot::Mutex;
 use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
-use crate::env::is_debug_build;
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::DRect;
 use crate::{RenderContext, WindowContext};
 
+#[derive(Debug)]
 enum ManipulateState {
     Idle,
     Drag,
@@ -118,7 +118,7 @@ impl TiledFractalApp {
                 }
             },
             Event::KeyboardInput(key) => {
-                if !is_debug_build() {
+                if !cfg!(debug_assertions) {
                     return EventResult::Continue;
                 }
 

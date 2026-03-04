@@ -18,7 +18,6 @@ use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::tiled_fractal_app::UserEvent;
 
 mod buffer_pool;
-mod env;
 mod event;
 mod mandel_texture;
 mod mandelbrot_simd;
@@ -28,6 +27,7 @@ mod tiled_fractal_app;
 
 type UserEventType = UserEvent;
 
+#[derive(Debug)]
 struct WindowContext<'window> {
     window: Arc<winit::window::Window>,
     surface: wgpu::Surface<'window>,
@@ -47,13 +47,13 @@ struct AppState<'window> {
     start: Instant,
 
     is_redrawing: bool,
-    is_resizing: bool,
     is_redraw_requested: bool,
 
     mouse_position: Option<UVec2>,
     error_scope_guard: Option<wgpu::ErrorScopeGuard>,
 }
 
+#[derive(Debug)]
 pub struct RenderContext<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -69,7 +69,6 @@ fn main() {
         window: None,
         fractal_app: None,
         is_redrawing: false,
-        is_resizing: false,
         is_redraw_requested: true,
         start: Instant::now(),
         mouse_position: None,
@@ -87,7 +86,9 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attr =
             winit::window::Window::default_attributes().with_title("Mandelbrot explorer");
-        let window = event_loop.create_window(window_attr).unwrap();
+        let window = event_loop
+            .create_window(window_attr)
+            .expect("Failed to create window");
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -96,7 +97,9 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
         });
-        let surface = instance.create_surface(window.clone()).unwrap();
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("Failed to create surface");
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -233,13 +236,10 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
         let _ = (event_loop, device_id, event);
     }
 
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             return;
         }
-
-        let result = self.finish_resizing();
-        self.process_event_result(event_loop, result);
 
         self.redraw_if_needed();
     }
@@ -329,24 +329,6 @@ impl AppState<'_> {
 
         surface_texture.present();
     }
-
-    fn finish_resizing(&mut self) -> EventResult {
-        if self.is_resizing {
-            self.is_resizing = false;
-
-            let window_size = self.window.as_ref().unwrap().window.inner_size();
-
-            self.fractal_app
-                .as_mut()
-                .unwrap()
-                .update(Event::Resized(UVec2::new(
-                    window_size.width,
-                    window_size.height,
-                )))
-        } else {
-            EventResult::Continue
-        }
-    }
 }
 
 fn process_window_event<UserEvent>(
@@ -360,12 +342,9 @@ fn process_window_event<UserEvent>(
         winit::event::WindowEvent::Focused(_is_focused) => Event::Unknown,
         winit::event::WindowEvent::CursorEntered { .. } => Event::Unknown,
         winit::event::WindowEvent::CursorLeft { .. } => Event::Unknown,
-        winit::event::WindowEvent::CursorMoved {
-            position: _position,
-            ..
-        } => {
+        winit::event::WindowEvent::CursorMoved { position, .. } => {
             let prev_pos = *mouse_position;
-            let new_pos = UVec2::new(_position.x as u32, _position.y as u32);
+            let new_pos = UVec2::new(position.x as u32, position.y as u32);
             *mouse_position = new_pos;
 
             Event::MouseMove {

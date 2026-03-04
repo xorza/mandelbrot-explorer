@@ -4,10 +4,10 @@ struct VertexOutput {
 };
 
 
-struct PushConstant {
+struct DrawParams {
     proj_mat: mat4x4<f32>,
 };
-var<immediate> pc: PushConstant;
+var<immediate> pc: DrawParams;
 
 
 @vertex

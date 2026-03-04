@@ -10,7 +10,6 @@ use anyhow::anyhow;
 use bytemuck::{Pod, Zeroable};
 use glam::DVec2;
 
-use crate::env::is_test_build;
 use crate::math::{DRect, URect};
 
 const SIMD_LANE_COUNT: usize = 8;
@@ -80,7 +79,7 @@ pub fn mandelbrot_simd(
         }
     }
 
-    if is_test_build() {
+    if cfg!(test) {
         let elapsed = now.elapsed();
         println!("Elapsed: {}ms", elapsed.as_millis());
         println!("Total pixels: {}", tex_rect.size.x * tex_rect.size.y);

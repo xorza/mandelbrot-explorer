@@ -14,7 +14,7 @@ use wgpu::util::DeviceExt;
 use crate::buffer_pool::{BufferHandle, BufferPool};
 use crate::mandelbrot_simd::{mandelbrot_simd, Pixel, MAX_ITER};
 use crate::math::{DRect, URect};
-use crate::render_pods::{PushConst, ScreenRect};
+use crate::render_pods::{DrawParams, ScreenRect};
 use crate::RenderContext;
 
 const TILE_SIZE: u32 = 128;
@@ -51,8 +51,6 @@ pub struct MandelTexture {
     bind_group2: wgpu::BindGroup,
 
     screen_rect_buf: wgpu::Buffer,
-    bind_group_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
 
     blit_pipeline: wgpu::RenderPipeline,
     screen_pipeline: wgpu::RenderPipeline,
@@ -192,7 +190,7 @@ impl MandelTexture {
         });
         let palette_view = palette_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let img = image::open("palette.png").unwrap();
+        let img = image::open("palette.png").expect("Failed to load palette.png");
         let img = img.into_rgba8();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -247,7 +245,7 @@ impl MandelTexture {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: &[&bind_group_layout],
-            immediate_size: PushConst::size_in_bytes(),
+            immediate_size: DrawParams::size_in_bytes(),
             label: None,
         });
 
@@ -378,9 +376,7 @@ impl MandelTexture {
             frame_changed: false,
 
             screen_rect_buf,
-            bind_group_layout,
             screen_pipeline,
-            sampler,
 
             buf_pool: BufferPool::new(buffer_size, 1000),
         }
@@ -534,7 +530,7 @@ impl MandelTexture {
             let offset = 2.0 * DVec2::new(offset.x, -offset.y);
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
 
-            let mut pc = PushConst::new();
+            let mut pc = DrawParams::new();
             pc.proj_mat = Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0))
                 * Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0));
             pc.texture_size = Vec2::splat(self.texture_size as f32);
@@ -559,11 +555,10 @@ impl MandelTexture {
         self.tiles.iter().for_each(|tile| {
             let mut tile_state = tile.state.lock();
             if let TileState::WaitForUpload { .. } = *tile_state {
-                let mut ready = TileState::Idle;
-                swap(&mut ready, &mut *tile_state);
-
-                let TileState::WaitForUpload { buffer } = ready else {
-                    panic!();
+                let TileState::WaitForUpload { buffer } =
+                    std::mem::replace(&mut *tile_state, TileState::Idle)
+                else {
+                    unreachable!()
                 };
                 let buffer = buffer.lock();
                 let buffer = buffer.as_slice();
@@ -605,7 +600,7 @@ impl MandelTexture {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut pc = PushConst::new();
+            let mut pc = DrawParams::new();
             pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
                 * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
 

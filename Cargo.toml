@@ -21,4 +21,4 @@ parking_lot = "0.12"
 [profile.release]
 opt-level = 3         # Apply the highest level of optimizations.
 lto = true            # Enable Link Time Optimization
-codegen-units = 256   # Reduce parallel code generation which can improve optimizations
+codegen-units = 1     # Reduce parallel code generation which can improve optimizations

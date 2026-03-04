@@ -4,19 +4,19 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, UVec2, Vec2};
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Vert {
     pos: [f32; 4],
     uw: [f32; 2],
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct ScreenRect([Vert; 4]);
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct PushConst {
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct DrawParams {
     pub proj_mat: Mat4,
     pub texture_size: Vec2,
     _padding: Vec2,
@@ -84,7 +84,7 @@ impl ScreenRect {
     }
 }
 
-impl PushConst {
+impl DrawParams {
     pub fn new() -> Self {
         Self {
             proj_mat: Mat4::default(),
@@ -96,6 +96,6 @@ impl PushConst {
         bytemuck::bytes_of(self)
     }
     pub fn size_in_bytes() -> u32 {
-        size_of::<PushConst>() as u32
+        size_of::<DrawParams>() as u32
     }
 }
