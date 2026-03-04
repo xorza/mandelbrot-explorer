@@ -25,9 +25,6 @@ fn vs_main(
 
 
 @group(0)
-@binding(0)
-var the_sampler: sampler;
-@group(0)
 @binding(1)
 var color: texture_2d<u32>;
 

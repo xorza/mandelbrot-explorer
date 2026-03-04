@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::mem::{size_of, swap};
+use std::mem::size_of;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -41,14 +41,15 @@ pub struct Tile {
 }
 
 #[derive(Debug)]
-pub struct MandelTexture {
-    texture1: wgpu::Texture,
-    texture1_view: wgpu::TextureView,
-    bind_group1: wgpu::BindGroup,
+struct TextureSlot {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+}
 
-    texture2: wgpu::Texture,
-    texture2_view: wgpu::TextureView,
-    bind_group2: wgpu::BindGroup,
+#[derive(Debug)]
+pub struct MandelTexture {
+    slots: [TextureSlot; 2],
 
     screen_rect_buf: wgpu::Buffer,
 
@@ -251,42 +252,28 @@ impl MandelTexture {
             label: None,
         });
 
-        let bind_group1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture1_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&palette_view),
-                },
-            ],
-            label: None,
-        });
-        let bind_group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture2_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&palette_view),
-                },
-            ],
-            label: None,
-        });
+        let create_bind_group = |view: &wgpu::TextureView| -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&palette_view),
+                    },
+                ],
+                label: None,
+            })
+        };
+        let bind_group1 = create_bind_group(&texture1_view);
+        let bind_group2 = create_bind_group(&texture2_view);
 
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -355,13 +342,18 @@ impl MandelTexture {
         let buffer_size = (TILE_SIZE * TILE_SIZE) as usize * size_of::<Pixel>();
 
         Self {
-            texture1,
-            texture1_view,
-            bind_group1,
-
-            texture2,
-            texture2_view,
-            bind_group2,
+            slots: [
+                TextureSlot {
+                    texture: texture1,
+                    view: texture1_view,
+                    bind_group: bind_group1,
+                },
+                TextureSlot {
+                    texture: texture2,
+                    view: texture2_view,
+                    bind_group: bind_group2,
+                },
+            ],
 
             blit_pipeline,
             window_size,
@@ -437,9 +429,7 @@ impl MandelTexture {
             }
 
             if tile_state.is_computing() && !frame_changed {
-                // when panning, tile could be already in progress
-                // or
-                // not in view, skip
+                // tile already in progress and fractal_rect unchanged, keep it
                 return;
             }
 
@@ -510,7 +500,7 @@ impl MandelTexture {
             let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.texture2_view,
+                    view: &self.slots[1].view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -539,15 +529,13 @@ impl MandelTexture {
 
             render_pass.set_immediates(0, pc.as_bytes());
 
-            render_pass.set_bind_group(0, &self.bind_group1, &[]);
+            render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 
         render_info.queue.submit(Some(command_encoder.finish()));
 
-        swap(&mut self.texture1, &mut self.texture2);
-        swap(&mut self.texture1_view, &mut self.texture2_view);
-        swap(&mut self.bind_group1, &mut self.bind_group2);
+        self.slots.swap(0, 1);
 
         self.frame_changed = false;
         self.fractal_rect_prev = self.fractal_rect;
@@ -566,7 +554,7 @@ impl MandelTexture {
                 let buffer = buffer.as_slice();
                 render_info.queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
-                        texture: &self.texture1,
+                        texture: &self.slots[0].texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d {
                             x: tile.tex_rect.pos.x,
@@ -625,7 +613,7 @@ impl MandelTexture {
             render_pass.set_pipeline(&self.screen_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
             render_pass.set_immediates(0, pc.as_bytes());
-            render_pass.set_bind_group(0, &self.bind_group1, &[]);
+            render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }
 

@@ -1,11 +1,7 @@
 #![allow(unused_parens)]
 
-use std::sync::Arc;
-
 use bytemuck::Zeroable;
 use glam::{DVec2, IVec2, UVec2};
-use parking_lot::Mutex;
-use tokio::runtime::Runtime;
 use winit::event_loop::EventLoopProxy;
 
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
@@ -21,8 +17,7 @@ enum ManipulateState {
 
 pub struct TiledFractalApp {
     window_size: UVec2,
-    event_loop_proxy: Arc<Mutex<EventLoopProxy<UserEvent>>>,
-    runtime: Runtime,
+    event_loop_proxy: EventLoopProxy<UserEvent>,
 
     manipulate_state: ManipulateState,
 
@@ -60,8 +55,7 @@ impl TiledFractalApp {
 
         let mut result = Self {
             window_size,
-            event_loop_proxy: Arc::new(Mutex::new(event_loop_proxy)),
-            runtime: Runtime::new().unwrap(),
+            event_loop_proxy,
 
             manipulate_state: ManipulateState::Idle,
 
@@ -194,7 +188,6 @@ impl TiledFractalApp {
         self.mandel_texture
             .update(self.frame_rect, focus, move |index| {
                 event_loop_proxy
-                    .lock()
                     .send_event(UserEvent::TileReady { tile_index: index })
                     .unwrap();
             });
