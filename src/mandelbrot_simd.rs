@@ -4,7 +4,6 @@ use std::simd::prelude::*;
 use std::simd::Select;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Instant;
 
 use anyhow::anyhow;
 use bytemuck::{Pod, Zeroable};
@@ -17,7 +16,6 @@ pub const MAX_ITER: u32 = 4500;
 
 type f64simd = Simd<f64, SIMD_LANE_COUNT>;
 type i64simd = Simd<i64, SIMD_LANE_COUNT>;
-type mask64simd = Mask<i64, SIMD_LANE_COUNT>;
 type CountSimd = [Pixel; SIMD_LANE_COUNT];
 
 #[repr(C)]
@@ -48,7 +46,9 @@ pub fn mandelbrot_simd(
 ) -> anyhow::Result<()> {
     assert_eq!(buffer.len(), (tex_rect.size.x * tex_rect.size.y) as usize);
 
-    let now = Instant::now();
+    #[cfg(test)]
+    let now = std::time::Instant::now();
+
     let buffer_frame = {
         let image_size = image_size as f64;
 
@@ -78,16 +78,11 @@ pub fn mandelbrot_simd(
         }
     }
 
-    if cfg!(test) {
+    #[cfg(test)]
+    {
         let elapsed = now.elapsed();
         println!("Elapsed: {}ms", elapsed.as_millis());
         println!("Total pixels: {}", tex_rect.size.x * tex_rect.size.y);
-
-        // let target = Duration::from_millis(100);
-        // if elapsed < target {
-        //     tokio::time::sleep(target - elapsed).await;
-        //     thread::sleep(target - elapsed);
-        // }
     }
 
     Ok(())
@@ -156,6 +151,7 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
+    use std::time::Instant;
 
     use glam::UVec2;
 
@@ -199,6 +195,7 @@ mod test {
                 image.put_pixel(x, y, color);
             }
         }
+        std::fs::create_dir_all("test_output").unwrap();
         image.save("test_output/mandelbrot.png").unwrap();
     }
 }

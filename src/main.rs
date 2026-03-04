@@ -1,6 +1,5 @@
 #![feature(portable_simd)]
 #![feature(test)]
-#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -33,7 +32,6 @@ struct WindowContext<'window> {
     surface: wgpu::Surface<'window>,
     surface_config: wgpu::SurfaceConfiguration,
 
-    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
 }
@@ -51,6 +49,18 @@ struct AppState<'window> {
 
     mouse_position: Option<UVec2>,
     error_scope_guard: Option<wgpu::ErrorScopeGuard>,
+}
+
+impl std::fmt::Debug for AppState<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState")
+            .field("window", &self.window)
+            .field("fractal_app", &self.fractal_app)
+            .field("is_redrawing", &self.is_redrawing)
+            .field("is_redraw_requested", &self.is_redraw_requested)
+            .field("mouse_position", &self.mouse_position)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -145,7 +155,6 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
             window: window.clone(),
             surface,
             surface_config,
-            adapter,
             device,
             queue,
         });

@@ -1,5 +1,3 @@
-#![allow(unused_parens)]
-
 use bytemuck::Zeroable;
 use glam::{DVec2, IVec2, UVec2};
 use winit::event_loop::EventLoopProxy;
@@ -15,6 +13,7 @@ enum ManipulateState {
     Drag,
 }
 
+#[derive(Debug)]
 pub struct TiledFractalApp {
     window_size: UVec2,
     event_loop_proxy: EventLoopProxy<UserEvent>,
@@ -22,15 +21,13 @@ pub struct TiledFractalApp {
     manipulate_state: ManipulateState,
 
     frame_rect: DRect,
-    aspect: DVec2,
 
     mandel_texture: MandelTexture,
 }
 
 #[derive(Debug)]
 pub enum UserEvent {
-    Redraw,
-    TileReady { tile_index: usize },
+    TileReady,
 }
 
 impl TiledFractalApp {
@@ -60,7 +57,6 @@ impl TiledFractalApp {
             manipulate_state: ManipulateState::Idle,
 
             frame_rect,
-            aspect,
 
             mandel_texture,
         };
@@ -175,21 +171,15 @@ impl TiledFractalApp {
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
         match event {
-            UserEvent::Redraw => EventResult::Redraw,
-            UserEvent::TileReady {
-                tile_index: _tile_index,
-            } => EventResult::Redraw,
+            UserEvent::TileReady => EventResult::Redraw,
         }
     }
 
     fn update_fractal(&mut self, focus: DVec2) {
         let event_loop_proxy = self.event_loop_proxy.clone();
 
-        self.mandel_texture
-            .update(self.frame_rect, focus, move |index| {
-                event_loop_proxy
-                    .send_event(UserEvent::TileReady { tile_index: index })
-                    .unwrap();
-            });
+        self.mandel_texture.update(self.frame_rect, focus, move || {
+            event_loop_proxy.send_event(UserEvent::TileReady).unwrap();
+        });
     }
 }

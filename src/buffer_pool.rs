@@ -61,16 +61,15 @@ impl BufferPool {
 
     pub fn take(&self) -> Arc<BufferHandle> {
         let vec = self.inner.available.lock().pop().unwrap_or_else(|| {
-            let total = self.inner.total_allocated.load(Ordering::Relaxed);
+            let prev = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed);
             assert!(
-                total < self.inner.max_allocated,
+                prev < self.inner.max_allocated,
                 "Buffer pool exhausted: {} allocated, max {}",
-                total,
+                prev + 1,
                 self.inner.max_allocated
             );
-            let new_total = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed) + 1;
             if cfg!(debug_assertions) {
-                println!("Total allocated buffers: {}", new_total);
+                println!("Total allocated buffers: {}", prev + 1);
             }
             vec![0u8; self.inner.buf_size]
         });

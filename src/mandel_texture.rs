@@ -35,7 +35,6 @@ pub enum TileState {
 
 #[derive(Debug)]
 pub struct Tile {
-    pub index: usize,
     pub tex_rect: URect,
     pub state: Arc<Mutex<TileState>>,
 }
@@ -72,10 +71,7 @@ pub struct MandelTexture {
 }
 
 fn calc_max_iters(fractal_rect: DRect) -> u32 {
-    let max_iterations =
-        (1000 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32).min(MAX_ITER);
-    // println!("max_iterations: {}", max_iterations);
-    max_iterations
+    (1000 + ((1.0 / fractal_rect.size.length_squared()).log2() * 50.0) as u32).min(MAX_ITER)
 }
 
 impl MandelTexture {
@@ -127,13 +123,11 @@ impl MandelTexture {
         let mut tiles = Vec::with_capacity(tile_count as usize * tile_count as usize);
         for i in 0..tile_count {
             for j in 0..tile_count {
-                let index = tiles.len();
                 let rect = URect {
                     pos: UVec2::new(i * TILE_SIZE, j * TILE_SIZE),
                     size: UVec2::new(TILE_SIZE, TILE_SIZE),
                 };
                 tiles.push(Tile {
-                    index,
                     tex_rect: rect,
                     state: Arc::new(Mutex::new(TileState::Idle)),
                 });
@@ -378,7 +372,7 @@ impl MandelTexture {
 
     pub fn update<F>(&mut self, frame_rect: DRect, focus: DVec2, tile_ready_callback: F)
     where
-        F: Fn(usize) + Clone + Send + Sync + 'static,
+        F: Fn() + Clone + Send + Sync + 'static,
     {
         self.frame_rect = frame_rect;
 
@@ -397,8 +391,6 @@ impl MandelTexture {
             self.frame_changed = true;
             self.fractal_rect_prev = self.fractal_rect;
             self.fractal_rect = new_fractal_rect;
-            // println!("frame_rect:   {:?}, center: {:?}", frame_rect, frame_rect.center());
-            // println!("fractal_rect: {:?}, center: {:?}", self.fractal_rect, self.fractal_rect.center());
         }
 
         let max_iters = calc_max_iters(self.fractal_rect);
@@ -429,7 +421,6 @@ impl MandelTexture {
             }
 
             if tile_state.is_computing() && !frame_changed {
-                // tile already in progress and fractal_rect unchanged, keep it
                 return;
             }
 
@@ -437,7 +428,6 @@ impl MandelTexture {
 
             let img_size = self.texture_size;
             let tex_rect = tile.tex_rect;
-            let tile_index = tile.index;
             let fractal_rect = self.fractal_rect;
 
             let callback = tile_ready_callback.clone();
@@ -470,7 +460,7 @@ impl MandelTexture {
                 let mut tile_state = tile_state_clone.lock();
                 if compute_ok {
                     *tile_state = TileState::WaitForUpload { buffer };
-                    (callback)(tile_index);
+                    (callback)();
                 }
             });
 

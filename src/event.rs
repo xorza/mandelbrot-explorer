@@ -20,12 +20,10 @@ pub enum ElementState {
 pub enum Event<UserEvent> {
     Resized(UVec2),
     WindowClose,
-    RedrawFinished,
     MouseWheel(UVec2, f32),
     MouseMove { position: UVec2, delta: IVec2 },
     MouseButton(MouseButtons, ElementState, UVec2),
     Custom(UserEvent),
-    TouchpadMagnify(UVec2, f32),
     KeyboardInput(winit::event::KeyEvent),
     Unknown,
 }

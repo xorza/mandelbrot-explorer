@@ -6,6 +6,7 @@ struct VertexOutput {
 
 struct DrawParams {
     proj_mat: mat4x4<f32>,
+    texture_size: vec2<f32>,
 };
 var<immediate> pc: DrawParams;
 

@@ -7,7 +7,7 @@ use glam::{Mat4, UVec2, Vec2};
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct Vert {
     pos: [f32; 4],
-    uw: [f32; 2],
+    uv: [f32; 2],
 }
 
 #[repr(C)]
@@ -28,19 +28,19 @@ impl Default for ScreenRect {
             // @formatter:off
             Vert {
                 pos: [-1.0, -1.0, 0.0, 1.0],
-                uw: [0.0, 0.0],
+                uv: [0.0, 0.0],
             },
             Vert {
                 pos: [-1.0, 1.0, 0.0, 1.0],
-                uw: [0.0, 1.0],
+                uv: [0.0, 1.0],
             },
             Vert {
                 pos: [1.0, -1.0, 0.0, 1.0],
-                uw: [1.0, 0.0],
+                uv: [1.0, 0.0],
             },
             Vert {
                 pos: [1.0, 1.0, 0.0, 1.0],
-                uw: [1.0, 1.0],
+                uv: [1.0, 1.0],
             },
             // @formatter:on
         ])
@@ -65,19 +65,19 @@ impl ScreenRect {
             // @formatter:off
             Vert {
                 pos: [-1.0, -1.0, 0.0, 1.0],
-                uw: [0.0, 0.0],
+                uv: [0.0, 0.0],
             },
             Vert {
                 pos: [-1.0, 1.0, 0.0, 1.0],
-                uw: [0.0, size.y as f32],
+                uv: [0.0, size.y as f32],
             },
             Vert {
                 pos: [1.0, -1.0, 0.0, 1.0],
-                uw: [size.x as f32, 0.0],
+                uv: [size.x as f32, 0.0],
             },
             Vert {
                 pos: [1.0, 1.0, 0.0, 1.0],
-                uw: [size.x as f32, size.y as f32],
+                uv: [size.x as f32, size.y as f32],
             },
             // @formatter:on
         ])
@@ -87,7 +87,7 @@ impl ScreenRect {
 impl DrawParams {
     pub fn new() -> Self {
         Self {
-            proj_mat: Mat4::default(),
+            proj_mat: Mat4::IDENTITY,
             texture_size: Vec2::default(),
             _padding: Vec2::default(),
         }
