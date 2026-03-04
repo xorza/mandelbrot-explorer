@@ -51,7 +51,6 @@ pub fn mandelbrot_simd(
     let now = Instant::now();
     let buffer_frame = {
         let image_size = image_size as f64;
-        let fractal_offset = DVec2::new(fractal_offset.x, fractal_offset.y);
 
         DRect::from_pos_size(
             (DVec2::from(tex_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
@@ -95,25 +94,53 @@ pub fn mandelbrot_simd(
 }
 
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
+    // Cardioid check: q*(q + (x - 0.25)) <= 0.25*y^2
+    let cy2 = cy * cy;
+    let xm = cx - f64simd::splat(0.25);
+    let q = xm * xm + cy2;
+    let in_cardioid = (q * (q + xm)).simd_le(f64simd::splat(0.25) * cy2);
+
+    // Period-2 bulb check: (x+1)^2 + y^2 <= 1/16
+    let xp1 = cx + f64simd::splat(1.0);
+    let in_bulb = (xp1 * xp1 + cy2).simd_le(f64simd::splat(0.0625));
+
+    let in_set = in_cardioid | in_bulb;
+
+    if in_set.all() {
+        return [Pixel { r: 0 }; SIMD_LANE_COUNT];
+    }
+
     let mut zx = f64simd::splat(0.0);
     let mut zy = f64simd::splat(0.0);
+    let mut zx2 = f64simd::splat(0.0);
+    let mut zy2 = f64simd::splat(0.0);
     let mut cnt = i64simd::splat(0);
-    let mut escaped = mask64simd::splat(false);
+    let mut escaped = in_set;
 
     let f64_4_0 = f64simd::splat(4.0);
     let i64_0 = i64simd::splat(0);
     let i64_1 = i64simd::splat(1);
 
-    for _ in 0..max_iterations {
-        (zx, zy) = (zx * zx - zy * zy + cx, zx * zy + zx * zy + cy);
-        escaped |= (zx * zx + zy * zy).simd_ge(f64_4_0);
+    let mut i = 0u32;
+    while i < max_iterations {
+        let batch = (max_iterations - i).min(8);
+        for _ in 0..batch {
+            zy = (zx + zx) * zy + cy;
+            zx = zx2 - zy2 + cx;
+            zx2 = zx * zx;
+            zy2 = zy * zy;
+            escaped |= (zx2 + zy2).simd_ge(f64_4_0);
+            cnt += escaped.select(i64_0, i64_1);
+        }
+        i += batch;
 
         if escaped.all() {
             break;
         }
-
-        cnt += escaped.select(i64_0, i64_1);
     }
+
+    let max_iter_simd = i64simd::splat(max_iterations as i64);
+    cnt = in_set.select(max_iter_simd, cnt);
 
     cnt.as_array().map(|iters| {
         if iters as u32 == max_iterations {
