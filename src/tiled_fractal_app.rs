@@ -71,7 +71,7 @@ impl TiledFractalApp {
             mandel_texture,
         };
         result.update_fractal(result.frame_rect.center());
-        return result;
+        result
     }
 
     pub fn update(&mut self, event: Event<UserEvent>) -> EventResult {

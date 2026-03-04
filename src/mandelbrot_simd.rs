@@ -1,10 +1,10 @@
 #![allow(non_camel_case_types)]
 
 use std::simd::prelude::*;
+use std::simd::Select;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
-use std::usize;
 
 use anyhow::anyhow;
 use bytemuck::{Pod, Zeroable};
@@ -65,8 +65,8 @@ pub fn mandelbrot_simd(
             return Err(anyhow!("Cancelled"));
         }
         for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
-            let cx = f64simd::from_array(CX_INIT)
-                + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
+            let cx =
+                f64simd::from_array(CX_INIT) + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
             let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
             let cx = cx + f64simd::splat(buffer_frame.pos.x);
 

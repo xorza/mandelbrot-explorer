@@ -1,5 +1,8 @@
 use parking_lot::Mutex;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Weak};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Weak,
+};
 
 #[derive(Debug)]
 pub struct BufferPool {
@@ -55,18 +58,13 @@ impl BufferPool {
     }
 
     pub fn take(&self) -> Arc<BufferHandle> {
-        let vec = self
-            .inner
-            .available
-            .lock()
-            .pop()
-            .unwrap_or_else(|| {
-                let new_total = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed) + 1;
-                if cfg!(debug_assertions) {
-                    println!("Total allocated buffers: {}", new_total);
-                }
-                vec![0u8; self.inner.buf_size]
-            });
+        let vec = self.inner.available.lock().pop().unwrap_or_else(|| {
+            let new_total = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed) + 1;
+            if cfg!(debug_assertions) {
+                println!("Total allocated buffers: {}", new_total);
+            }
+            vec![0u8; self.inner.buf_size]
+        });
 
         Arc::new(BufferHandle {
             data: Mutex::new(vec),

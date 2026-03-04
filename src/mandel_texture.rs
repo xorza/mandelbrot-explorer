@@ -201,7 +201,7 @@ impl MandelTexture {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &img.as_raw(),
+            img.as_raw(),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256 * 4),
@@ -247,10 +247,7 @@ impl MandelTexture {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[wgpu::PushConstantRange {
-                stages: wgpu::ShaderStages::VERTEX,
-                range: 0..PushConst::size_in_bytes(),
-            }],
+            immediate_size: PushConst::size_in_bytes(),
             label: None,
         });
 
@@ -319,7 +316,7 @@ impl MandelTexture {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -351,7 +348,7 @@ impl MandelTexture {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -526,6 +523,7 @@ impl MandelTexture {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.blit_pipeline);
@@ -541,7 +539,7 @@ impl MandelTexture {
                 * Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0));
             pc.texture_size = Vec2::splat(self.texture_size as f32);
 
-            render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
+            render_pass.set_immediates(0, pc.as_bytes());
 
             render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
@@ -625,10 +623,11 @@ impl MandelTexture {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             render_pass.set_pipeline(&self.screen_pipeline);
             render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
-            render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, pc.as_bytes());
+            render_pass.set_immediates(0, pc.as_bytes());
             render_pass.set_bind_group(0, &self.bind_group1, &[]);
             render_pass.draw(0..ScreenRect::vert_count(), 0..1);
         }

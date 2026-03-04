@@ -51,6 +51,7 @@ struct AppState<'window> {
     is_redraw_requested: bool,
 
     mouse_position: Option<UVec2>,
+    error_scope_guard: Option<wgpu::ErrorScopeGuard>,
 }
 
 pub struct RenderContext<'a> {
@@ -73,11 +74,12 @@ fn main() {
         start: Instant::now(),
         mouse_position: None,
         event_loop_proxy: event_loop.create_proxy(),
+        error_scope_guard: None,
     };
     event_loop.run_app(&mut app_state).unwrap();
 }
 
-impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
+impl ApplicationHandler<UserEventType> for AppState<'_> {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
         let _ = (event_loop, cause);
     }
@@ -109,18 +111,19 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
 
         // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
         let limits = Limits {
-            max_push_constant_size: 256,
+            max_immediate_size: 256,
             ..Default::default()
         }
         .using_resolution(adapter.limits());
 
-        let features = wgpu::Features::PUSH_CONSTANTS | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
+        let features = wgpu::Features::IMMEDIATES | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: features,
                 required_limits: limits,
+                experimental_features: Default::default(),
                 memory_hints: Default::default(),
                 trace: Default::default(),
             })
@@ -256,7 +259,7 @@ impl<'a> ApplicationHandler<UserEventType> for AppState<'_> {
     }
 }
 
-impl<'a> AppState<'_> {
+impl AppState<'_> {
     fn process_event_result(&mut self, event_loop: &ActiveEventLoop, event_result: EventResult) {
         match event_result {
             EventResult::Continue => {}
@@ -273,15 +276,11 @@ impl<'a> AppState<'_> {
 
     fn redraw_if_needed(&mut self) {
         if self.is_redrawing {
-            let error = self
-                .window
-                .as_ref()
-                .unwrap()
-                .device
-                .pop_error_scope()
-                .block_on();
-            if let Some(error) = error {
-                panic!("Device error: {:?}", error);
+            if let Some(guard) = self.error_scope_guard.take() {
+                let error = guard.pop().block_on();
+                if let Some(error) = error {
+                    panic!("Device error: {:?}", error);
+                }
             }
         }
         self.is_redrawing = false;
@@ -315,9 +314,11 @@ impl<'a> AppState<'_> {
                     ..wgpu::TextureViewDescriptor::default()
                 });
 
-        window_state
-            .device
-            .push_error_scope(wgpu::ErrorFilter::Validation);
+        self.error_scope_guard = Some(
+            window_state
+                .device
+                .push_error_scope(wgpu::ErrorFilter::Validation),
+        );
 
         self.fractal_app.as_mut().unwrap().render(&RenderContext {
             device: &window_state.device,
@@ -376,7 +377,7 @@ fn process_window_event<UserEvent>(
         winit::event::WindowEvent::MouseInput { state, button, .. } => Event::MouseButton(
             MouseButtons::from(button),
             ElementState::from(state),
-            mouse_position.clone(),
+            *mouse_position,
         ),
         winit::event::WindowEvent::MouseWheel {
             delta,
@@ -384,7 +385,7 @@ fn process_window_event<UserEvent>(
             ..
         } => match delta {
             winit::event::MouseScrollDelta::LineDelta(_l1, l2) => {
-                Event::MouseWheel(mouse_position.clone(), l2)
+                Event::MouseWheel(*mouse_position, l2)
             }
             winit::event::MouseScrollDelta::PixelDelta(_pix) => Event::Unknown,
         },
@@ -393,8 +394,8 @@ fn process_window_event<UserEvent>(
             delta,
             phase: _phase,
         } => {
-            // Event::TouchpadMagnify(mouse_position.clone(), delta as f32)
-            Event::MouseWheel(mouse_position.clone(), -50.0 * delta as f32)
+            // Event::TouchpadMagnify(*mouse_position, delta as f32)
+            Event::MouseWheel(*mouse_position, -50.0 * delta as f32)
         }
         winit::event::WindowEvent::CloseRequested => Event::WindowClose,
         winit::event::WindowEvent::Moved(_position) => Event::Unknown,

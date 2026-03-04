@@ -7,7 +7,7 @@ struct VertexOutput {
 struct PushConstant {
     proj_mat: mat4x4<f32>,
 };
-var<push_constant> pc: PushConstant;
+var<immediate> pc: PushConstant;
 
 
 @vertex
