@@ -9,7 +9,7 @@ edition = "2021"
 winit = "0.30"
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.32", features = ["bytemuck"] }
-wgpu = "28"
+wgpu = "29"
 pollster = "0.4"
 tokio = { version = "1.50", features = ["full"] }
 anyhow = "1.0"

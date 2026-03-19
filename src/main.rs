@@ -1,5 +1,4 @@
 #![feature(portable_simd)]
-#![feature(test)]
 
 use std::sync::Arc;
 
@@ -101,11 +100,12 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
             .expect("Failed to create window");
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: Default::default(),
             memory_budget_thresholds: Default::default(),
             backend_options: Default::default(),
+            display: None,
         });
         let surface = instance
             .create_surface(window.clone())
@@ -303,18 +303,17 @@ impl AppState<'_> {
 
         let window_state = self.window.as_mut().unwrap();
 
-        let surface_texture = match window_state.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(_) => {
-                window_state
-                    .surface
-                    .configure(&window_state.device, &window_state.surface_config);
-                window_state
-                    .surface
-                    .get_current_texture()
-                    .expect("Failed to acquire next surface texture.")
-            }
+        let get_frame = |t: wgpu::CurrentSurfaceTexture| match t {
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => Some(f),
+            _ => None,
         };
+
+        let surface_texture = get_frame(window_state.surface.get_current_texture()).unwrap_or_else(|| {
+            window_state.surface.configure(&window_state.device, &window_state.surface_config);
+            get_frame(window_state.surface.get_current_texture())
+                .expect("Failed to acquire next surface texture")
+        });
         let surface_texture_view =
             surface_texture
                 .texture

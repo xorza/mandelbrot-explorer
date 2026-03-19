@@ -241,7 +241,7 @@ impl MandelTexture {
             label: None,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: DrawParams::size_in_bytes(),
             label: None,
         });
