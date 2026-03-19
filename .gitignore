@@ -1,10 +1,2 @@
 /target
-
 /test_output
-
-/.idea/shelf/
-/.idea/workspace.xml
-/Cargo.lock
-
-/rustc-ice-*.txt
-/.idea/dbnavigator.xml
