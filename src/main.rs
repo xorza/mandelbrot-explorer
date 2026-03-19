@@ -189,11 +189,11 @@ impl ApplicationHandler<UserEventType> for AppState<'_> {
             return;
         }
 
-        if self.mouse_position.is_none() {
-            if let winit::event::WindowEvent::CursorMoved { position, .. } = event {
-                let position = UVec2::new(position.x as u32, position.y as u32);
-                self.mouse_position = Some(position);
-            }
+        if self.mouse_position.is_none()
+            && let winit::event::WindowEvent::CursorMoved { position, .. } = event
+        {
+            let position = UVec2::new(position.x as u32, position.y as u32);
+            self.mouse_position = Some(position);
         }
 
         let event_result = match event {
@@ -284,12 +284,12 @@ impl AppState<'_> {
     }
 
     fn redraw_if_needed(&mut self) {
-        if self.is_redrawing {
-            if let Some(guard) = self.error_scope_guard.take() {
-                let error = guard.pop().block_on();
-                if let Some(error) = error {
-                    panic!("Device error: {:?}", error);
-                }
+        if self.is_redrawing
+            && let Some(guard) = self.error_scope_guard.take()
+        {
+            let error = guard.pop().block_on();
+            if let Some(error) = error {
+                panic!("Device error: {:?}", error);
             }
         }
         self.is_redrawing = false;
