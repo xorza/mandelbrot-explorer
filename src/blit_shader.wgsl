@@ -12,13 +12,15 @@ var<immediate> pc: DrawParams;
 
 
 @vertex
-fn vs_main(
-    @location(0) position: vec4<f32>,
-    @location(1) tex_coord: vec2<f32>,
-) -> VertexOutput {
+fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
+    // Fullscreen triangle-strip quad from the vertex index:
+    // 0->(-1,-1) 1->(-1,1) 2->(1,-1) 3->(1,1); uv is in texel space.
+    let corner = vec2<f32>(f32(idx >> 1u), f32(idx & 1u));
+    let uv = corner * pc.texture_size;
+
     var result: VertexOutput;
-    result.position = pc.proj_mat * position;
-    result.tex_coord = vec2(tex_coord.x, pc.texture_size.y - tex_coord.y);
+    result.position = pc.proj_mat * vec4<f32>(corner * 2.0 - 1.0, 0.0, 1.0);
+    result.tex_coord = vec2(uv.x, pc.texture_size.y - uv.y);
 
     return result;
 }

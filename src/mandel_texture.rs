@@ -6,14 +6,13 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use bytemuck::Zeroable;
 use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
-use wgpu::util::DeviceExt;
 
 use crate::RenderContext;
 use crate::buffer_pool::{BufferHandle, BufferPool};
 use crate::compute_pool::ComputePool;
 use crate::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_simd};
 use crate::math::{DRect, URect};
-use crate::render_pods::{DrawParams, ScreenRect};
+use crate::render_pods::{DrawParams, FULLSCREEN_QUAD_VERTS};
 
 const TILE_SIZE: u32 = 128;
 const TEXTURE_SIZE: u32 = 4 * 1024;
@@ -59,8 +58,6 @@ struct TextureSlot {
 #[derive(Debug)]
 pub struct MandelTexture {
     slots: [TextureSlot; 2],
-
-    screen_rect_buf: wgpu::Buffer,
 
     blit_pipeline: wgpu::RenderPipeline,
     screen_pipeline: wgpu::RenderPipeline,
@@ -150,28 +147,6 @@ impl MandelTexture {
 
         let pool = ComputePool::new(num_cpus::get_physical().max(1));
         let (result_tx, result_rx) = channel();
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: ScreenRect::vert_size() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
-                    offset: 4 * 4,
-                    shader_location: 1,
-                },
-            ],
-        }];
-        let screen_rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: ScreenRect::with_texture_size(UVec2::splat(texture_size)).as_bytes(),
-            usage: wgpu::BufferUsages::VERTEX,
-            label: None,
-        });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -293,7 +268,7 @@ impl MandelTexture {
                 module: &blit_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &vertex_buffers,
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &blit_shader,
@@ -325,7 +300,7 @@ impl MandelTexture {
                 module: &screen_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &vertex_buffers,
+                buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &screen_shader,
@@ -378,7 +353,6 @@ impl MandelTexture {
             frame_changed: false,
             generation: 0,
 
-            screen_rect_buf,
             screen_pipeline,
 
             buf_pool: BufferPool::new(buffer_size, 256),
@@ -517,7 +491,6 @@ impl MandelTexture {
             });
 
             render_pass.set_pipeline(&self.blit_pipeline);
-            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
 
             let offset = (self.fractal_rect_prev.center() - self.fractal_rect.center())
                 / self.fractal_rect_prev.size;
@@ -532,7 +505,7 @@ impl MandelTexture {
             render_pass.set_immediates(0, pc.as_bytes());
 
             render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
-            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+            render_pass.draw(0..FULLSCREEN_QUAD_VERTS, 0..1);
         }
 
         render_info.queue.submit(Some(command_encoder.finish()));
@@ -604,6 +577,8 @@ impl MandelTexture {
             let mut pc = DrawParams::new();
             pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
                 * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
+            // The vertex-less screen shader derives texel UVs from this.
+            pc.texture_size = tex_size;
 
             let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -622,10 +597,9 @@ impl MandelTexture {
                 multiview_mask: None,
             });
             render_pass.set_pipeline(&self.screen_pipeline);
-            render_pass.set_vertex_buffer(0, self.screen_rect_buf.slice(..));
             render_pass.set_immediates(0, pc.as_bytes());
             render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
-            render_pass.draw(0..ScreenRect::vert_count(), 0..1);
+            render_pass.draw(0..FULLSCREEN_QUAD_VERTS, 0..1);
         }
 
         render_info.queue.submit(Some(command_encoder.finish()));

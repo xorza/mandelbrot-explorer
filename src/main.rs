@@ -324,15 +324,23 @@ impl AppState<'_> {
             surface_texture
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(window_state.surface_config.format),
+                    // Must match the screen pipeline's color target, which is
+                    // built for the sRGB view format (`view_formats[0]`).
+                    format: Some(window_state.surface_config.view_formats[0]),
                     ..wgpu::TextureViewDescriptor::default()
                 });
 
-        self.error_scope_guard = Some(
-            window_state
-                .device
-                .push_error_scope(wgpu::ErrorFilter::Validation),
-        );
+        // Validation-error checking is a debug aid: popping the scope blocks on
+        // the device, so it would stall the pipeline every frame. Only pay it in
+        // debug builds; in release no scope is pushed and the pop below is inert.
+        #[cfg(debug_assertions)]
+        {
+            self.error_scope_guard = Some(
+                window_state
+                    .device
+                    .push_error_scope(wgpu::ErrorFilter::Validation),
+            );
+        }
 
         self.fractal_app.as_mut().unwrap().render(&RenderContext {
             device: &window_state.device,
