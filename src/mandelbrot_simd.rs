@@ -183,6 +183,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "heavy 2048² render; run with: cargo test --release -- --ignored"]
     fn draw_mandelbrot() {
         let image_size = 2048;
         let fractal_offset = DVec2::new(0.10486747136388758, 0.9244368813525663);

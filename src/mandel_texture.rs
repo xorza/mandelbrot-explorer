@@ -658,3 +658,50 @@ impl TileState {
         *self = TileState::Idle;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tile(px: u32, py: u32) -> Tile {
+        Tile {
+            tex_rect: URect {
+                pos: UVec2::new(px, py),
+                size: UVec2::splat(TILE_SIZE),
+            },
+            state: TileState::Idle,
+        }
+    }
+
+    #[test]
+    fn tile_fractal_rect_maps_texels_to_fractal_space() {
+        // A 4096² texture covering fractal [-2, 2]²; each 128px tile spans
+        // 4 * 128 / 4096 = 0.125 in fractal units.
+        let tex_size = 4096;
+        let fractal = DRect::from_pos_size(DVec2::splat(-2.0), DVec2::splat(4.0));
+
+        // Top-left tile starts at the fractal-rect origin.
+        let tl = tile(0, 0).fractal_rect(tex_size, fractal);
+        assert_eq!(tl.pos, DVec2::splat(-2.0));
+        assert_eq!(tl.size, DVec2::splat(0.125));
+
+        // The tile at texel (2048, 2048) is the exact center → fractal origin.
+        let mid = tile(2048, 2048).fractal_rect(tex_size, fractal);
+        assert_eq!(mid.pos, DVec2::splat(0.0));
+        assert_eq!(mid.size, DVec2::splat(0.125));
+    }
+
+    #[test]
+    fn calc_max_iters_grows_with_zoom_and_caps() {
+        let by_size = |s: f64| calc_max_iters(DRect::from_pos_size(DVec2::ZERO, DVec2::splat(s)));
+
+        // size (1,1): 1/|size|² = 0.5, log2 = -1 → negative term saturates to 0.
+        assert_eq!(by_size(1.0), 1000);
+        // size (0.001, 0.001): 1/(2e-6)=5e5, log2≈18.9316, *50≈946 → 1946.
+        assert_eq!(by_size(0.001), 1946);
+        // Deep zoom saturates at MAX_ITER.
+        assert_eq!(by_size(1e-12), MAX_ITER);
+        // Monotonic: zooming in never lowers the iteration budget.
+        assert!(by_size(0.01) >= by_size(0.1));
+    }
+}

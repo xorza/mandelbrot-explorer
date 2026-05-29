@@ -24,7 +24,6 @@ pub enum Event<UserEvent> {
     MouseMove { position: UVec2, delta: IVec2 },
     MouseButton(MouseButtons, ElementState, UVec2),
     Custom(UserEvent),
-    KeyboardInput(winit::event::KeyEvent),
     Unknown,
 }
 

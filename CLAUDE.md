@@ -11,7 +11,7 @@ A desktop Mandelbrot explorer (crate name `fractal`). The set is computed on the
 Requires **nightly** (pinned in `rust-toolchain.toml`) for the `portable_simd` feature — there is no stable fallback.
 
 - Run: `cargo run --release` — release is effectively mandatory; the SIMD kernel is unusably slow in debug, and the release profile sets `lto=true`, `codegen-units=1`.
-- Test: prefer `cargo test --release` — `mandelbrot_simd::test::draw_mandelbrot` renders a 2048² image and is unusably slow in a debug build. Single test: `cargo test --release escape_counts`.
+- Test: `cargo test` runs the fast unit tests (geometry, kernel correctness, pools). The one heavy test, `mandelbrot_simd::test::draw_mandelbrot` (a 2048² render, unusably slow in debug), is `#[ignore]`d — run it with `cargo test --release -- --ignored`.
 - Standard verification: `cargo fmt --all && cargo check && cargo clippy --all-targets -- -D warnings`.
 
 The palette is embedded as raw RGBA via `include_bytes!("../palette.rgba")` (256×1, 1024 bytes), decoded ahead of time from `palette.png`. The production build pulls in **no image codec**; the `image` crate is a dev-dependency used only by `draw_mandelbrot`. If you change `palette.png`, regenerate `palette.rgba` (e.g. with PIL: `Image.open('palette.png').convert('RGBA').tobytes()`).

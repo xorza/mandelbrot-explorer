@@ -95,26 +95,6 @@ impl TiledFractalApp {
                 self.dragging = matches!((btn, state), (MouseButtons::Left, ElementState::Pressed));
                 EventResult::Continue
             }
-            Event::KeyboardInput(key) => {
-                if !cfg!(debug_assertions) {
-                    return EventResult::Continue;
-                }
-
-                if key.state != winit::event::ElementState::Released {
-                    return EventResult::Continue;
-                }
-
-                match key.physical_key {
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {
-                        EventResult::Redraw
-                    }
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyD) => {
-                        self.update_fractal(self.frame_rect.center());
-                        EventResult::Redraw
-                    }
-                    _ => EventResult::Continue,
-                }
-            }
 
             Event::Custom(event) => self.update_user_event(event),
 
@@ -127,29 +107,15 @@ impl TiledFractalApp {
     }
 
     fn move_scale(&mut self, mouse_pos: UVec2, mouse_delta: IVec2, scroll_delta: f32) {
-        let mouse_pos = IVec2::new(
-            mouse_pos.x as i32,
-            self.window_size.y as i32 - mouse_pos.y as i32,
+        let result = frame_after_manipulation(
+            self.frame_rect,
+            self.window_size,
+            mouse_pos,
+            mouse_delta,
+            scroll_delta,
         );
-        let mouse_pos = DVec2::from(mouse_pos) / DVec2::from(self.window_size);
-        let mouse_pos = mouse_pos - 0.5f64;
-
-        let mouse_delta = DVec2::from(mouse_delta) / DVec2::from(self.window_size);
-        let mouse_delta = DVec2::new(mouse_delta.x, -mouse_delta.y);
-
-        let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
-
-        let old_size = self.frame_rect.size;
-        let new_size = old_size * zoom;
-
-        let old_offset = self.frame_rect.center();
-        let new_offset = old_offset - mouse_delta * new_size - mouse_pos * (new_size - old_size);
-
-        self.frame_rect = DRect::from_center_size(new_offset, new_size);
-
-        let focus = self.frame_rect.center() + self.frame_rect.size * mouse_pos;
-
-        self.update_fractal(focus);
+        self.frame_rect = result.frame_rect;
+        self.update_fractal(result.focus);
     }
 
     fn update_user_event(&mut self, event: UserEvent) -> EventResult {
@@ -166,5 +132,113 @@ impl TiledFractalApp {
             // the redraw it wants is moot then, so a closed loop is not an error.
             let _ = event_loop_proxy.send_event(UserEvent::TileReady);
         });
+    }
+}
+
+#[derive(Debug)]
+struct ManipulateResult {
+    frame_rect: DRect,
+    focus: DVec2,
+}
+
+/// Pure pan/zoom math: maps the current viewport plus a pointer interaction to
+/// the new viewport. Zoom is anchored at the cursor — the fractal point under
+/// the pointer stays under the pointer — and `focus` is exactly that point, fed
+/// to the tiler as compute priority. `mouse_delta` pans; `scroll_delta` zooms.
+fn frame_after_manipulation(
+    frame_rect: DRect,
+    window_size: UVec2,
+    mouse_pos: UVec2,
+    mouse_delta: IVec2,
+    scroll_delta: f32,
+) -> ManipulateResult {
+    // Pointer in normalized, y-up, origin-at-center coordinates ([-0.5, 0.5]).
+    let mouse_pos = IVec2::new(
+        mouse_pos.x as i32,
+        window_size.y as i32 - mouse_pos.y as i32,
+    );
+    let mouse_pos = DVec2::from(mouse_pos) / DVec2::from(window_size) - 0.5;
+
+    let mouse_delta = DVec2::from(mouse_delta) / DVec2::from(window_size);
+    let mouse_delta = DVec2::new(mouse_delta.x, -mouse_delta.y);
+
+    let zoom = 1.15f64.powf(scroll_delta as f64 / 5.0f64);
+
+    let old_size = frame_rect.size;
+    let new_size = old_size * zoom;
+
+    let old_center = frame_rect.center();
+    let new_center = old_center - mouse_delta * new_size - mouse_pos * (new_size - old_size);
+
+    let frame_rect = DRect::from_center_size(new_center, new_size);
+    let focus = frame_rect.center() + frame_rect.size * mouse_pos;
+
+    ManipulateResult { frame_rect, focus }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WIN: UVec2 = UVec2::new(100, 100);
+
+    fn rect(cx: f64, cy: f64, sx: f64, sy: f64) -> DRect {
+        DRect::from_center_size(DVec2::new(cx, cy), DVec2::new(sx, sy))
+    }
+
+    fn assert_close(a: DVec2, b: DVec2, what: &str) {
+        assert!((a - b).length() < 1e-9, "{what}: {a:?} != {b:?}");
+    }
+
+    #[test]
+    fn drag_pans_opposite_to_cursor_motion_without_resizing() {
+        // Cursor at center, drag right by 10px. No scroll => size unchanged.
+        let r = frame_after_manipulation(
+            rect(0.0, 0.0, 2.0, 2.0),
+            WIN,
+            UVec2::new(50, 50),
+            IVec2::new(10, 0),
+            0.0,
+        );
+        // new_center = (0,0) - (10/100, 0)*(2,2) = (-0.2, 0); focus at cursor (mp=0).
+        assert_close(r.frame_rect.size, DVec2::new(2.0, 2.0), "size");
+        assert_close(r.frame_rect.center(), DVec2::new(-0.2, 0.0), "center");
+        assert_close(r.focus, DVec2::new(-0.2, 0.0), "focus");
+    }
+
+    #[test]
+    fn zoom_at_center_keeps_center_and_scales_by_1_15() {
+        let r = frame_after_manipulation(
+            rect(0.0, 0.0, 2.0, 2.0),
+            WIN,
+            UVec2::new(50, 50),
+            IVec2::ZERO,
+            5.0, // 1.15^(5/5) = 1.15
+        );
+        assert_close(r.frame_rect.size, DVec2::new(2.3, 2.3), "size");
+        assert_close(r.frame_rect.center(), DVec2::new(0.0, 0.0), "center");
+        assert_close(r.focus, DVec2::new(0.0, 0.0), "focus");
+    }
+
+    #[test]
+    fn zoom_is_anchored_at_the_cursor() {
+        // Cursor 1/4 to the right of center; the fractal point under it must not move.
+        let frame = rect(0.0, 0.0, 2.0, 2.0);
+        let mouse = UVec2::new(75, 50);
+
+        // Fractal point under the cursor before the zoom.
+        // mp = (75/100, 50/100) flipped-y - 0.5 = (0.25, 0.0); point = center + size*mp.
+        let mp = DVec2::new(0.25, 0.0);
+        let point_before = frame.center() + frame.size * mp;
+        assert_close(point_before, DVec2::new(0.5, 0.0), "point under cursor");
+
+        let r = frame_after_manipulation(frame, WIN, mouse, IVec2::ZERO, 5.0);
+
+        // After zooming, the same screen position maps to the same fractal point.
+        let point_after = r.frame_rect.center() + r.frame_rect.size * mp;
+        assert_close(point_after, point_before, "cursor anchor invariant");
+        assert_close(r.frame_rect.size, DVec2::new(2.3, 2.3), "size");
+        // focus is exactly the anchored point.
+        assert_close(r.focus, point_before, "focus");
     }
 }
