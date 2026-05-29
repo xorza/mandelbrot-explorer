@@ -1,9 +1,9 @@
 use parking_lot::Mutex;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc, Weak,
-};
+use std::sync::{Arc, Weak};
 
+/// Recycling free-list of fixed-size byte buffers. Buffers return themselves to
+/// the pool when their `BufferHandle` is dropped; the pool grows on demand and
+/// never shrinks, so steady-state allocation tracks the working set.
 #[derive(Debug)]
 pub struct BufferPool {
     inner: Arc<BufferPoolInner>,
@@ -12,9 +12,7 @@ pub struct BufferPool {
 #[derive(Debug)]
 struct BufferPoolInner {
     buf_size: usize,
-    max_allocated: usize,
     available: Mutex<Vec<Vec<u8>>>,
-    total_allocated: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -32,57 +30,64 @@ impl BufferHandle {
 impl Drop for BufferHandle {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.upgrade() {
-            let mut buf = self.data.lock();
-            let mut avail = pool.available.lock();
-            avail.push(std::mem::take(&mut *buf));
+            pool.available
+                .lock()
+                .push(std::mem::take(&mut *self.data.lock()));
         }
     }
 }
 
 impl BufferPool {
     pub fn new(buf_size: usize, reserved_count: usize) -> Self {
-        let inner = Arc::new(BufferPoolInner {
-            buf_size,
-            max_allocated: reserved_count,
-            available: Mutex::new(Vec::new()),
-            total_allocated: AtomicUsize::new(0),
-        });
-
-        {
-            let mut avail = inner.available.lock();
-            for _ in 0..reserved_count {
-                avail.push(vec![0u8; buf_size]);
-                inner.total_allocated.fetch_add(1, Ordering::Relaxed);
-            }
+        let available = (0..reserved_count).map(|_| vec![0u8; buf_size]).collect();
+        Self {
+            inner: Arc::new(BufferPoolInner {
+                buf_size,
+                available: Mutex::new(available),
+            }),
         }
-
-        Self { inner }
     }
 
     pub fn take(&self) -> Arc<BufferHandle> {
-        let vec = self.inner.available.lock().pop().unwrap_or_else(|| {
-            let prev = self.inner.total_allocated.fetch_add(1, Ordering::Relaxed);
-            assert!(
-                prev < self.inner.max_allocated,
-                "Buffer pool exhausted: {} allocated, max {}",
-                prev + 1,
-                self.inner.max_allocated
-            );
-            if cfg!(debug_assertions) {
-                println!("Total allocated buffers: {}", prev + 1);
-            }
-            vec![0u8; self.inner.buf_size]
-        });
-
+        let vec = self
+            .inner
+            .available
+            .lock()
+            .pop()
+            .unwrap_or_else(|| vec![0u8; self.inner.buf_size]);
         Arc::new(BufferHandle {
             data: Mutex::new(vec),
             pool: Arc::downgrade(&self.inner),
         })
     }
+}
 
-    pub(crate) fn taken_buffer_count(&self) -> u32 {
-        let allocated = self.inner.total_allocated.load(Ordering::Relaxed);
-        let available = self.inner.available.lock().len();
-        (allocated - available) as u32
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recycles_buffers_and_grows_past_reserve() {
+        let pool = BufferPool::new(16, 1);
+
+        // The single reserved buffer is handed out first.
+        let a = pool.take();
+        assert_eq!(a.lock().len(), 16);
+
+        // Pool is now empty; taking again grows it instead of panicking.
+        let b = pool.take();
+        assert_eq!(b.lock().len(), 16);
+
+        // Mark `a`, drop it back into the pool.
+        a.lock()[0] = 7;
+        drop(a);
+
+        // The next take must reuse `a`'s exact buffer (data preserved proves
+        // recycling, not a fresh zeroed allocation).
+        let c = pool.take();
+        assert_eq!(c.lock()[0], 7);
+
+        drop(b);
+        drop(c);
     }
 }

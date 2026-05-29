@@ -1,15 +1,14 @@
 #![allow(non_camel_case_types)]
 
-use std::simd::prelude::*;
 use std::simd::Select;
-use std::sync::atomic::AtomicBool;
+use std::simd::prelude::*;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::anyhow;
 use bytemuck::{Pod, Zeroable};
-use glam::DVec2;
+use glam::UVec2;
 
-use crate::math::{DRect, URect};
+use crate::math::DRect;
 
 const SIMD_LANE_COUNT: usize = 8;
 pub const MAX_ITER: u32 = 4500;
@@ -35,57 +34,39 @@ const CX_INIT: [f64; SIMD_LANE_COUNT] = {
 };
 
 //noinspection RsConstantConditionIf
+/// Renders `tile_rect` (in fractal space) into `buffer` at `tile_size` pixels.
+/// Returns `false` if `cancel_token` was raised before completion.
 pub fn mandelbrot_simd(
-    image_size: u32,
-    tex_rect: URect,
-    fractal_offset: DVec2,
-    fractal_scale: f64,
+    tile_rect: DRect,
+    tile_size: UVec2,
     max_iterations: u32,
     cancel_token: Arc<AtomicBool>,
     buffer: &mut [Pixel],
-) -> anyhow::Result<()> {
-    assert_eq!(buffer.len(), (tex_rect.size.x * tex_rect.size.y) as usize);
+) -> bool {
+    assert_eq!(buffer.len(), (tile_size.x * tile_size.y) as usize);
+    assert_eq!(tile_size.x % SIMD_LANE_COUNT as u32, 0);
 
-    #[cfg(test)]
-    let now = std::time::Instant::now();
-
-    let buffer_frame = {
-        let image_size = image_size as f64;
-
-        DRect::from_pos_size(
-            (DVec2::from(tex_rect.pos) / image_size - 0.5) / fractal_scale - fractal_offset,
-            (DVec2::from(tex_rect.size) / image_size) / fractal_scale,
-        )
-    };
-
-    for y in 0..tex_rect.size.y {
-        if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(anyhow!("Cancelled"));
+    for y in 0..tile_size.y {
+        if cancel_token.load(Ordering::Relaxed) {
+            return false;
         }
-        for x in 0..tex_rect.size.x / SIMD_LANE_COUNT as u32 {
+        for x in 0..tile_size.x / SIMD_LANE_COUNT as u32 {
             let cx =
                 f64simd::from_array(CX_INIT) + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
-            let cx = cx * f64simd::splat(buffer_frame.size.x / tex_rect.size.x as f64);
-            let cx = cx + f64simd::splat(buffer_frame.pos.x);
+            let cx = cx * f64simd::splat(tile_rect.size.x / tile_size.x as f64);
+            let cx = cx + f64simd::splat(tile_rect.pos.x);
 
             let cy = f64simd::splat(
-                buffer_frame.pos.y + buffer_frame.size.y * (y as f64 / tex_rect.size.y as f64),
+                tile_rect.pos.y + tile_rect.size.y * (y as f64 / tile_size.y as f64),
             );
 
             let values_simd = pixel(max_iterations, cx, cy);
-            let idx = (y * tex_rect.size.x + x * SIMD_LANE_COUNT as u32) as usize;
+            let idx = (y * tile_size.x + x * SIMD_LANE_COUNT as u32) as usize;
             buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
         }
     }
 
-    #[cfg(test)]
-    {
-        let elapsed = now.elapsed();
-        println!("Elapsed: {}ms", elapsed.as_millis());
-        println!("Total pixels: {}", tex_rect.size.x * tex_rect.size.y);
-    }
-
-    Ok(())
+    true
 }
 
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
@@ -153,16 +134,61 @@ mod test {
     use std::sync::Arc;
     use std::time::Instant;
 
-    use glam::UVec2;
+    use glam::{DVec2, UVec2};
 
     use super::*;
+
+    /// Rebuilds the fractal rect the old `(offset, scale)` API produced for a
+    /// full-image render, so the rendered output is byte-identical.
+    fn full_image_rect(offset: DVec2, scale: f64) -> DRect {
+        DRect::from_pos_size(
+            DVec2::splat(-0.5) / scale - offset,
+            DVec2::splat(1.0 / scale),
+        )
+    }
+
+    #[test]
+    fn escape_counts_match_hand_computed() {
+        // A square 8×8 tile over [-2, 2]² in fractal space.
+        let tile_size = UVec2::splat(8);
+        let tile_rect = DRect::from_pos_size(DVec2::splat(-2.0), DVec2::splat(4.0));
+        let max_iterations = 50;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut buffer = vec![Pixel::default(); 64];
+
+        assert!(mandelbrot_simd(
+            tile_rect,
+            tile_size,
+            max_iterations,
+            cancel,
+            &mut buffer
+        ));
+
+        // Pixel (x, y) samples c = (-2 + x*0.5, -2 + y*0.5).
+        let at = |x: u32, y: u32| buffer[(y * 8 + x) as usize].r;
+
+        // Origin c = (0, 0): inside the set => never escapes => stored as 0.
+        // x=4 -> -2+2=0, y=4 -> 0.
+        assert_eq!(at(4, 4), 0, "origin is in the set");
+
+        // c = (-2, -2) (corner): z1 = c, |z1|^2 = 8 >= 4 escapes on iter 1, which
+        // does not increment the counter (escape iteration counts 0) => cnt 0,
+        // stored as 0 + 1 offset => 1.
+        assert_eq!(at(0, 0), 1, "far corner escapes immediately");
+
+        // c = (0.5, 0): zx progresses 0.5, 0.75, 1.0625, 1.6289 (4 non-escaping
+        // iterations), then 3.1533 whose square 9.94 >= 4 escapes on the 5th
+        // (uncounted) => cnt 4, stored as 4 + 1 offset => 5.
+        assert_eq!(at(5, 4), 5, "c=0.5 escapes after 4 counted iterations");
+    }
 
     #[test]
     fn draw_mandelbrot() {
         let image_size = 2048;
-        let tile_rect = URect::from_pos_size(UVec2::new(0, 0), UVec2::new(image_size, image_size));
         let fractal_offset = DVec2::new(0.10486747136388758, 0.9244368813525663);
         let fractal_scale = 32.0;
+        let tile_rect = full_image_rect(fractal_offset, fractal_scale);
+        let tile_size = UVec2::splat(image_size);
         let max_iterations = 1024;
         let cancel_token = Arc::new(AtomicBool::new(false));
         let mut buffer = vec![Pixel::default(); (image_size * image_size) as usize];
@@ -171,16 +197,13 @@ mod test {
         let retry = 5;
 
         for _ in 0..retry {
-            mandelbrot_simd(
-                image_size,
+            assert!(mandelbrot_simd(
                 tile_rect,
-                fractal_offset,
-                fractal_scale,
+                tile_size,
                 max_iterations,
                 cancel_token.clone(),
                 &mut buffer,
-            )
-            .unwrap();
+            ));
         }
 
         let elapsed = new.elapsed();

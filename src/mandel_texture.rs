@@ -1,21 +1,19 @@
 use std::borrow::Cow;
 use std::mem::size_of;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use bytemuck::Zeroable;
 use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
 use parking_lot::Mutex;
-use tokio::runtime::Runtime;
-use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
 use wgpu::util::DeviceExt;
 
+use crate::RenderContext;
 use crate::buffer_pool::{BufferHandle, BufferPool};
-use crate::mandelbrot_simd::{mandelbrot_simd, Pixel, MAX_ITER};
+use crate::compute_pool::ComputePool;
+use crate::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_simd};
 use crate::math::{DRect, URect};
 use crate::render_pods::{DrawParams, ScreenRect};
-use crate::RenderContext;
 
 const TILE_SIZE: u32 = 128;
 const TEXTURE_SIZE: u32 = 4 * 1024;
@@ -25,7 +23,6 @@ pub enum TileState {
     #[default]
     Idle,
     Computing {
-        task_handle: JoinHandle<()>,
         cancel_token: Arc<AtomicBool>,
     },
     WaitForUpload {
@@ -55,13 +52,12 @@ pub struct MandelTexture {
     blit_pipeline: wgpu::RenderPipeline,
     screen_pipeline: wgpu::RenderPipeline,
 
-    pub(crate) buf_pool: BufferPool,
+    buf_pool: BufferPool,
 
     window_size: UVec2,
     texture_size: u32,
 
-    runtime: Runtime,
-    semaphore: Arc<Semaphore>,
+    pool: ComputePool,
     tiles: Vec<Tile>,
 
     frame_rect: DRect,
@@ -134,9 +130,7 @@ impl MandelTexture {
             }
         }
 
-        let runtime = Runtime::new().unwrap();
-        let cpu_core_count = num_cpus::get_physical();
-        let semaphore = Arc::new(Semaphore::new(cpu_core_count * 2));
+        let pool = ComputePool::new(num_cpus::get_physical().max(1));
 
         let vertex_buffers = [wgpu::VertexBufferLayout {
             array_stride: ScreenRect::vert_size() as wgpu::BufferAddress,
@@ -185,10 +179,10 @@ impl MandelTexture {
         });
         let palette_view = palette_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let palette_bytes = include_bytes!("../palette.png");
-        let img = image::load_from_memory(palette_bytes)
-            .expect("Failed to decode embedded palette")
-            .into_rgba8();
+        // Raw RGBA8, 256×1, decoded from palette.png ahead of time so the
+        // production build needs no image codec.
+        let palette_rgba = include_bytes!("../palette.rgba");
+        assert_eq!(palette_rgba.len(), 256 * 4);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &palette_texture,
@@ -196,7 +190,7 @@ impl MandelTexture {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            img.as_raw(),
+            palette_rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256 * 4),
@@ -352,8 +346,7 @@ impl MandelTexture {
             blit_pipeline,
             window_size,
 
-            runtime,
-            semaphore,
+            pool,
 
             texture_size,
             tiles,
@@ -366,7 +359,7 @@ impl MandelTexture {
             screen_rect_buf,
             screen_pipeline,
 
-            buf_pool: BufferPool::new(buffer_size, 1000),
+            buf_pool: BufferPool::new(buffer_size, 256),
         }
     }
 
@@ -389,7 +382,10 @@ impl MandelTexture {
 
         if frame_changed {
             self.frame_changed = true;
-            self.fractal_rect_prev = self.fractal_rect;
+            // `fractal_rect_prev` is owned solely by `blit_textures`, which tracks
+            // the rect the current slot's pixels were rendered at. Assigning it
+            // here would corrupt the preview when several updates coalesce into
+            // one render.
             self.fractal_rect = new_fractal_rect;
         }
 
@@ -426,35 +422,22 @@ impl MandelTexture {
 
             tile_state.cancel();
 
-            let img_size = self.texture_size;
-            let tex_rect = tile.tex_rect;
-            let fractal_rect = self.fractal_rect;
+            let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
+            let tile_px = tile.tex_rect.size;
 
             let callback = tile_ready_callback.clone();
             let cancel_token = Arc::new(AtomicBool::new(false));
             let cancel_token_clone = cancel_token.clone();
             let tile_state_clone = tile.state.clone();
-            let semaphore = self.semaphore.clone();
 
             let buffer = self.buf_pool.take();
 
-            let task_handle = self.runtime.spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
-
+            self.pool.spawn(move || {
                 let compute_ok = {
                     let buffer = &mut *buffer.lock();
                     let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
-                    mandelbrot_simd(
-                        img_size,
-                        tex_rect,
-                        -fractal_rect.center(),
-                        1.0 / fractal_rect.size.y,
-                        max_iters,
-                        cancel_token_clone,
-                        buffer,
-                    )
-                    .is_ok()
+                    mandelbrot_simd(tile_rect, tile_px, max_iters, cancel_token_clone, buffer)
                 };
 
                 let mut tile_state = tile_state_clone.lock();
@@ -464,10 +447,7 @@ impl MandelTexture {
                 }
             });
 
-            *tile_state = TileState::Computing {
-                task_handle,
-                cancel_token,
-            };
+            *tile_state = TileState::Computing { cancel_token };
         });
     }
 
@@ -630,13 +610,8 @@ impl Tile {
 
 impl TileState {
     fn cancel(&mut self) {
-        if let TileState::Computing {
-            task_handle,
-            cancel_token,
-        } = self
-        {
+        if let TileState::Computing { cancel_token } = self {
             cancel_token.store(true, std::sync::atomic::Ordering::Relaxed);
-            task_handle.abort();
         }
 
         *self = TileState::Idle;

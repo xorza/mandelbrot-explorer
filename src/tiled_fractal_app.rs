@@ -117,11 +117,6 @@ impl TiledFractalApp {
                 }
 
                 match key.physical_key {
-                    winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyA) => {
-                        let count = self.mandel_texture.buf_pool.taken_buffer_count();
-                        println!("Taken buffer count: {}", count);
-                        EventResult::Continue
-                    }
                     winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyS) => {
                         EventResult::Redraw
                     }
@@ -179,7 +174,9 @@ impl TiledFractalApp {
         let event_loop_proxy = self.event_loop_proxy.clone();
 
         self.mandel_texture.update(self.frame_rect, focus, move || {
-            event_loop_proxy.send_event(UserEvent::TileReady).unwrap();
+            // A worker can finish after the event loop has closed (shutdown);
+            // the redraw it wants is moot then, so a closed loop is not an error.
+            let _ = event_loop_proxy.send_event(UserEvent::TileReady);
         });
     }
 }

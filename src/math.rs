@@ -15,13 +15,6 @@ pub struct DRect {
     pub size: DVec2,
 }
 
-impl URect {
-    #[cfg(test)]
-    pub fn from_pos_size(pos: UVec2, size: UVec2) -> Self {
-        Self { pos, size }
-    }
-}
-
 impl DRect {
     pub fn from_pos_size(pos: DVec2, size: DVec2) -> Self {
         Self { pos, size }

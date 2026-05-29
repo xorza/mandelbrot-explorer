@@ -5,7 +5,6 @@ use std::sync::Arc;
 use bytemuck::Zeroable;
 use glam::{IVec2, UVec2};
 use pollster::FutureExt;
-use tokio::time::Instant;
 use wgpu::Limits;
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId};
@@ -16,6 +15,7 @@ use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::tiled_fractal_app::UserEvent;
 
 mod buffer_pool;
+mod compute_pool;
 mod event;
 mod mandel_texture;
 mod mandelbrot_simd;
@@ -41,8 +41,6 @@ struct AppState<'window> {
 
     event_loop_proxy: EventLoopProxy<UserEventType>,
 
-    start: Instant,
-
     is_redrawing: bool,
     is_redraw_requested: bool,
 
@@ -67,7 +65,6 @@ pub struct RenderContext<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
     pub view: &'a wgpu::TextureView,
-    pub time: f64,
 }
 
 fn main() {
@@ -79,7 +76,6 @@ fn main() {
         fractal_app: None,
         is_redrawing: false,
         is_redraw_requested: true,
-        start: Instant::now(),
         mouse_position: None,
         event_loop_proxy: event_loop.create_proxy(),
         error_scope_guard: None,
@@ -303,17 +299,27 @@ impl AppState<'_> {
 
         let window_state = self.window.as_mut().unwrap();
 
-        let get_frame = |t: wgpu::CurrentSurfaceTexture| match t {
-            wgpu::CurrentSurfaceTexture::Success(f)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => Some(f),
-            _ => None,
+        let surface_texture = {
+            use wgpu::CurrentSurfaceTexture as Cst;
+            match window_state.surface.get_current_texture() {
+                Cst::Success(f) | Cst::Suboptimal(f) => f,
+                // The drawable isn't usable yet — at startup the window may not
+                // be on-screen, and it can become occluded/stale later. Per
+                // wgpu's guidance, reconfigure when stale and otherwise just
+                // skip this frame; we re-request a redraw so the next wake-up
+                // (a window or tile-ready event) tries again.
+                reason => {
+                    if matches!(reason, Cst::Outdated | Cst::Lost) {
+                        window_state
+                            .surface
+                            .configure(&window_state.device, &window_state.surface_config);
+                    }
+                    self.is_redrawing = false;
+                    self.is_redraw_requested = true;
+                    return;
+                }
+            }
         };
-
-        let surface_texture = get_frame(window_state.surface.get_current_texture()).unwrap_or_else(|| {
-            window_state.surface.configure(&window_state.device, &window_state.surface_config);
-            get_frame(window_state.surface.get_current_texture())
-                .expect("Failed to acquire next surface texture")
-        });
         let surface_texture_view =
             surface_texture
                 .texture
@@ -332,7 +338,6 @@ impl AppState<'_> {
             device: &window_state.device,
             queue: &window_state.queue,
             view: &surface_texture_view,
-            time: self.start.elapsed().as_secs_f64(),
         });
 
         surface_texture.present();

@@ -22,30 +22,6 @@ pub struct DrawParams {
     _padding: Vec2,
 }
 
-impl Default for ScreenRect {
-    fn default() -> ScreenRect {
-        ScreenRect([
-            // @formatter:off
-            Vert {
-                pos: [-1.0, -1.0, 0.0, 1.0],
-                uv: [0.0, 0.0],
-            },
-            Vert {
-                pos: [-1.0, 1.0, 0.0, 1.0],
-                uv: [0.0, 1.0],
-            },
-            Vert {
-                pos: [1.0, -1.0, 0.0, 1.0],
-                uv: [1.0, 0.0],
-            },
-            Vert {
-                pos: [1.0, 1.0, 0.0, 1.0],
-                uv: [1.0, 1.0],
-            },
-            // @formatter:on
-        ])
-    }
-}
 impl ScreenRect {
     pub fn vert_size() -> u32 {
         size_of::<Vert>() as u32
