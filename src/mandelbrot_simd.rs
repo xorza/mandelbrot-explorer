@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types)]
 
 use std::simd::Select;
+use std::simd::StdFloat;
 use std::simd::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,6 +46,9 @@ pub fn mandelbrot_simd(
 ) -> bool {
     assert_eq!(buffer.len(), (tile_size.x * tile_size.y) as usize);
     assert_eq!(tile_size.x % SIMD_LANE_COUNT as u32, 0);
+    // Counts are stored in a u16 (and used un-offset below); the caller caps
+    // `max_iterations` at `MAX_ITER`, far under this bound.
+    debug_assert!(max_iterations < u16::MAX as u32);
 
     for y in 0..tile_size.y {
         if cancel_token.load(Ordering::Relaxed) {
@@ -97,21 +101,38 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let i64_0 = i64simd::splat(0);
     let i64_1 = i64simd::splat(1);
 
-    let mut i = 0u32;
-    while i < max_iterations {
-        let batch = (max_iterations - i).min(8);
-        for _ in 0..batch {
-            zy = (zx + zx) * zy + cy;
+    // One iteration step. `2*zx*zy + cy` is a fused multiply-add (hardware FMA;
+    // see .cargo/config.toml for the target-feature requirement).
+    macro_rules! step {
+        () => {{
+            zy = (zx + zx).mul_add(zy, cy);
             zx = zx2 - zy2 + cx;
             zx2 = zx * zx;
             zy2 = zy * zy;
             escaped |= (zx2 + zy2).simd_ge(f64_4_0);
             cnt += escaped.select(i64_0, i64_1);
-        }
-        i += batch;
+        }};
+    }
 
+    // Full chunks of 8 run a const-bound (unrollable) inner loop and amortise
+    // the escape reduction to once per chunk; a short remainder finishes the
+    // tail when `max_iterations` isn't a multiple of 8.
+    let mut i = 0u32;
+    let mut all_escaped = false;
+    while i + SIMD_LANE_COUNT as u32 <= max_iterations {
+        for _ in 0..SIMD_LANE_COUNT {
+            step!();
+        }
+        i += SIMD_LANE_COUNT as u32;
         if escaped.all() {
+            all_escaped = true;
             break;
+        }
+    }
+    if !all_escaped {
+        while i < max_iterations {
+            step!();
+            i += 1;
         }
     }
 
@@ -123,7 +144,7 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
             Pixel { r: 0 }
         } else {
             Pixel {
-                r: 1 + (iters % u16::MAX as i64) as u16,
+                r: 1 + iters as u16,
             }
         }
     })
