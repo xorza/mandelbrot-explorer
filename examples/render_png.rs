@@ -7,22 +7,30 @@
 //! environments where the winit app can't open a window.
 //!
 //! Usage:
-//!   cargo run --release --example render_png -- [out.png] [size] [cx cy half] [max_iter] [--de]
+//!   cargo run --release --example render_png -- [out.png] [size] [cx cy half] [max_iter] [--de|--deep]
 //! Defaults: mandelbrot.png 1024  (full set: -0.5 0 1.5)  auto max_iter.
+//! `--de` = distance-estimation shading; `--deep` = perturbation deep zoom
+//! (bignum reference orbit, past the f64 wall; fixed demo centre, half default 1e-18).
 
 use std::sync::mpsc;
 
 use encase::{ShaderType, UniformBuffer};
 use fractal::mandelbrot_simd::{DePixel, MAX_ITER, Pixel, mandelbrot_simd, mandelbrot_simd_de};
 use fractal::math::DRect;
+use fractal::perturbation::{ReferenceOrbit, mandelbrot_perturbation};
 use glam::{DVec2, Mat4, UVec2, Vec2};
 
-/// Immediate block for both shaders (layout via `encase`). `pixel_spacing` is
-/// read by the DE shader; the smooth shader treats it as trailing padding.
+/// Deep-zoom demo centre (seahorse valley), as decimal strings so it survives
+/// past the f64 wall. Used by `--deep`.
+const DEEP_CENTER: (&str, &str) = ("-0.74364388703715", "0.13182590420533");
+
+/// Immediate block for both shaders (layout via `encase`, using glam's
+/// `ShaderType` impls). `pixel_spacing` is read by the DE shader; the smooth
+/// shader treats it as trailing padding.
 #[derive(ShaderType)]
 struct DrawParams {
-    proj_mat: mint::ColumnMatrix4<f32>,
-    texture_size: mint::Vector2<f32>,
+    proj_mat: Mat4,
+    texture_size: Vec2,
     pixel_spacing: f32,
 }
 
@@ -37,7 +45,8 @@ impl DrawParams {
 fn main() {
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let de_mode = raw.iter().any(|a| a == "--de");
-    let mut pos = raw.into_iter().filter(|a| a != "--de");
+    let deep_mode = raw.iter().any(|a| a == "--deep");
+    let mut pos = raw.into_iter().filter(|a| a != "--de" && a != "--deep");
 
     let out_path = pos.next().unwrap_or_else(|| "mandelbrot.png".to_string());
     let size = pos
@@ -62,6 +71,43 @@ fn main() {
 
     let tile_size = UVec2::splat(size);
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    // Deep zoom: perturbation off a bignum reference orbit, past the f64 wall.
+    if deep_mode {
+        let deep_half = if half == 1.5 { 1e-18 } else { half };
+        let digits = ((-deep_half.log10()) as usize + 25).max(40);
+        let deep_max = (1000.0 + (1.0 / (2.0 * deep_half).powi(2)).log2().max(0.0) * 50.0)
+            .min(MAX_ITER as f64) as u32;
+        eprintln!(
+            "deep render: center {DEEP_CENTER:?}, half {deep_half:e}, {digits} digits, max_iter {deep_max}"
+        );
+        let orbit =
+            ReferenceOrbit::from_center_decimal(DEEP_CENTER.0, DEEP_CENTER.1, deep_max, digits);
+        eprintln!("reference orbit length {}", orbit.z.len());
+
+        // Per-pixel offsets from the reference centre (small, f64-exact).
+        let delta_rect =
+            DRect::from_pos_size(DVec2::splat(-deep_half), DVec2::splat(2.0 * deep_half));
+        let mut buf = vec![Pixel::default(); (size * size) as usize];
+        mandelbrot_perturbation(&orbit, delta_rect, tile_size, deep_max, &mut buf);
+
+        let params = DrawParams {
+            proj_mat: Mat4::IDENTITY,
+            texture_size: Vec2::splat(size as f32),
+            pixel_spacing: 0.0,
+        };
+        pollster::block_on(render(
+            bytemuck::cast_slice(&buf),
+            wgpu::TextureFormat::Rg32Float,
+            include_str!("../src/screen_shader.wgsl"),
+            params,
+            size,
+            &out_path,
+        ));
+        eprintln!("wrote {out_path}");
+        return;
+    }
+
     let pixel_spacing = (rect.size.x / size as f64) as f32;
     eprintln!(
         "rendering {size}×{size} @ ({cx}, {cy}) half {half}, max_iter {max_iter}{}",
@@ -71,8 +117,8 @@ fn main() {
     // CPU render, then GPU color + readback. Both paths share one render helper;
     // only the texel format and shader differ.
     let params = DrawParams {
-        proj_mat: Mat4::IDENTITY.into(),
-        texture_size: Vec2::splat(size as f32).into(),
+        proj_mat: Mat4::IDENTITY,
+        texture_size: Vec2::splat(size as f32),
         pixel_spacing,
     };
     if de_mode {

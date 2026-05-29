@@ -8,19 +8,19 @@ pub const FULLSCREEN_QUAD_VERTS: u32 = 4;
 
 /// Immediate block for the blit/screen shaders. `encase` derives the GPU layout
 /// (matching the WGSL `var<immediate>` rules) so it can't silently drift from
-/// the shader struct. glam values convert to `mint` at the boundary — encase has
-/// no glam-0.33 impls yet, but `mint` is version-stable interop both share.
+/// the shader struct. glam's `encase` feature provides the `ShaderType` impls
+/// for `Mat4`/`Vec2` directly.
 #[derive(Debug, Clone, Copy, ShaderType)]
 pub struct DrawParams {
-    proj_mat: mint::ColumnMatrix4<f32>,
-    texture_size: mint::Vector2<f32>,
+    proj_mat: Mat4,
+    texture_size: Vec2,
 }
 
 impl DrawParams {
     pub fn new(proj_mat: Mat4, texture_size: Vec2) -> Self {
         Self {
-            proj_mat: proj_mat.into(),
-            texture_size: texture_size.into(),
+            proj_mat,
+            texture_size,
         }
     }
 

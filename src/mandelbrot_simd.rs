@@ -64,8 +64,9 @@ fn axis_lanes(pos: f64, span: f64, n: u32, base: u32) -> f64simd {
         + f64simd::splat(pos)
 }
 
-/// Fractal-space coordinate of a single pixel `i` along the same axis.
-fn axis_scalar(pos: f64, span: f64, n: u32, i: u32) -> f64 {
+/// Fractal-space coordinate of a single pixel `i` along the same axis. Shared
+/// with the perturbation kernel so both map pixels to coordinates identically.
+pub(crate) fn axis_scalar(pos: f64, span: f64, n: u32, i: u32) -> f64 {
     pos + span * (i as f64 / n as f64)
 }
 

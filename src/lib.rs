@@ -20,6 +20,7 @@ pub(crate) mod event;
 pub(crate) mod mandel_texture;
 pub mod mandelbrot_simd;
 pub mod math;
+pub mod perturbation;
 pub(crate) mod render_pods;
 pub(crate) mod tiled_fractal_app;
 
