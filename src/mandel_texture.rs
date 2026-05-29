@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::mem::size_of;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use bytemuck::Zeroable;
 use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
-use parking_lot::Mutex;
 use wgpu::util::DeviceExt;
 
 use crate::RenderContext;
@@ -18,22 +18,35 @@ use crate::render_pods::{DrawParams, ScreenRect};
 const TILE_SIZE: u32 = 128;
 const TEXTURE_SIZE: u32 = 4 * 1024;
 
-#[derive(Debug, Default)]
-pub enum TileState {
-    #[default]
+/// Per-tile state, owned entirely on the main thread. `generation` is the
+/// `fractal_rect` epoch the content was computed for; a tile is only valid when
+/// its generation matches the texture's current one.
+#[derive(Debug)]
+enum TileState {
     Idle,
     Computing {
         cancel_token: Arc<AtomicBool>,
+        generation: u64,
     },
-    WaitForUpload {
-        buffer: Arc<BufferHandle>,
+    Ready {
+        generation: u64,
     },
 }
 
 #[derive(Debug)]
-pub struct Tile {
-    pub tex_rect: URect,
-    pub state: Arc<Mutex<TileState>>,
+struct Tile {
+    tex_rect: URect,
+    state: TileState,
+}
+
+/// A finished tile render handed back from a worker thread. Carries the
+/// generation it was computed for so stale results (geometry moved on) can be
+/// dropped on arrival.
+#[derive(Debug)]
+struct TileResult {
+    index: usize,
+    buffer: Arc<BufferHandle>,
+    generation: u64,
 }
 
 #[derive(Debug)]
@@ -59,11 +72,16 @@ pub struct MandelTexture {
 
     pool: ComputePool,
     tiles: Vec<Tile>,
+    result_tx: Sender<TileResult>,
+    result_rx: Receiver<TileResult>,
 
     frame_rect: DRect,
     fractal_rect: DRect,
     fractal_rect_prev: DRect,
     frame_changed: bool,
+    // Bumped whenever `fractal_rect` changes; stamps tile content so stale tiles
+    // (and stale in-flight results) are recognised and recomputed.
+    generation: u64,
 }
 
 fn calc_max_iters(fractal_rect: DRect) -> u32 {
@@ -125,12 +143,13 @@ impl MandelTexture {
                 };
                 tiles.push(Tile {
                     tex_rect: rect,
-                    state: Arc::new(Mutex::new(TileState::Idle)),
+                    state: TileState::Idle,
                 });
             }
         }
 
         let pool = ComputePool::new(num_cpus::get_physical().max(1));
+        let (result_tx, result_rx) = channel();
 
         let vertex_buffers = [wgpu::VertexBufferLayout {
             array_stride: ScreenRect::vert_size() as wgpu::BufferAddress,
@@ -350,11 +369,14 @@ impl MandelTexture {
 
             texture_size,
             tiles,
+            result_tx,
+            result_rx,
 
             frame_rect: DRect::zeroed(),
             fractal_rect: DRect::zeroed(),
             fractal_rect_prev: DRect::zeroed(),
             frame_changed: false,
+            generation: 0,
 
             screen_rect_buf,
             screen_pipeline,
@@ -382,6 +404,7 @@ impl MandelTexture {
 
         if frame_changed {
             self.frame_changed = true;
+            self.generation += 1;
             // `fractal_rect_prev` is owned solely by `blit_textures`, which tracks
             // the rect the current slot's pixels were rendered at. Assigning it
             // here would corrupt the preview when several updates coalesce into
@@ -390,46 +413,47 @@ impl MandelTexture {
         }
 
         let max_iters = calc_max_iters(self.fractal_rect);
+        let generation = self.generation;
 
-        self.tiles.sort_unstable_by(|a, b| {
-            let a_center = a
-                .fractal_rect(self.texture_size, self.fractal_rect)
-                .center();
-            let b_center = b
-                .fractal_rect(self.texture_size, self.fractal_rect)
-                .center();
-
-            let a_dist = (a_center - focus).length_squared();
-            let b_dist = (b_center - focus).length_squared();
-
-            a_dist.partial_cmp(&b_dist).unwrap()
-        });
-
-        self.tiles.iter_mut().for_each(|tile| {
-            let mut tile_state = tile.state.lock();
-
+        // One pass over the grid: cancel anything out of view, keep tiles whose
+        // content is already valid for this generation (so a static view or a
+        // pan within the margin recomputes nothing), and collect the rest —
+        // newly exposed or stale — to (re)spawn in focus-priority order.
+        let mut to_spawn: Vec<(usize, f64)> = Vec::new();
+        for (idx, tile) in self.tiles.iter_mut().enumerate() {
             let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
-            let tile_in_view = frame_rect.intersects(&tile_rect);
 
-            if !tile_in_view {
-                tile_state.cancel();
-                return;
+            if !frame_rect.intersects(&tile_rect) {
+                tile.state.cancel();
+                continue;
             }
 
-            if tile_state.is_computing() && !frame_changed {
-                return;
+            let valid = match &tile.state {
+                TileState::Computing { generation: g, .. } | TileState::Ready { generation: g } => {
+                    *g == generation
+                }
+                TileState::Idle => false,
+            };
+            if valid {
+                continue;
             }
 
-            tile_state.cancel();
+            let dist = (tile_rect.center() - focus).length_squared();
+            to_spawn.push((idx, dist));
+        }
 
-            let tile_rect = tile.fractal_rect(self.texture_size, self.fractal_rect);
-            let tile_px = tile.tex_rect.size;
+        to_spawn.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
-            let callback = tile_ready_callback.clone();
+        for (idx, _) in to_spawn {
+            self.tiles[idx].state.cancel();
+
+            let tile_rect = self.tiles[idx].fractal_rect(self.texture_size, self.fractal_rect);
+            let tile_px = self.tiles[idx].tex_rect.size;
+
             let cancel_token = Arc::new(AtomicBool::new(false));
             let cancel_token_clone = cancel_token.clone();
-            let tile_state_clone = tile.state.clone();
-
+            let result_tx = self.result_tx.clone();
+            let callback = tile_ready_callback.clone();
             let buffer = self.buf_pool.take();
 
             self.pool.spawn(move || {
@@ -440,15 +464,23 @@ impl MandelTexture {
                     mandelbrot_simd(tile_rect, tile_px, max_iters, cancel_token_clone, buffer)
                 };
 
-                let mut tile_state = tile_state_clone.lock();
                 if compute_ok {
-                    *tile_state = TileState::WaitForUpload { buffer };
-                    (callback)();
+                    // A closed channel means the texture is shutting down; the
+                    // result and its redraw are moot, so just drop them.
+                    let _ = result_tx.send(TileResult {
+                        index: idx,
+                        buffer,
+                        generation,
+                    });
+                    callback();
                 }
             });
 
-            *tile_state = TileState::Computing { cancel_token };
-        });
+            self.tiles[idx].state = TileState::Computing {
+                cancel_token,
+                generation,
+            };
+        }
     }
 
     pub fn render(&mut self, render_info: &RenderContext) {
@@ -512,41 +544,50 @@ impl MandelTexture {
     }
 
     fn upload_tiles(&mut self, render_info: &RenderContext) {
-        self.tiles.iter().for_each(|tile| {
-            let mut tile_state = tile.state.lock();
-            if let TileState::WaitForUpload { .. } = *tile_state {
-                let TileState::WaitForUpload { buffer } =
-                    std::mem::replace(&mut *tile_state, TileState::Idle)
-                else {
-                    unreachable!()
-                };
-                let buffer = buffer.lock();
-                let buffer = buffer.as_slice();
+        while let Ok(result) = self.result_rx.try_recv() {
+            // Accept only if this tile is still awaiting exactly this render — a
+            // stale generation means the geometry moved on, so drop the result
+            // (its buffer returns to the pool).
+            let accept = matches!(
+                self.tiles[result.index].state,
+                TileState::Computing { generation, .. } if generation == result.generation
+            );
+            if !accept {
+                continue;
+            }
+
+            let tex_rect = self.tiles[result.index].tex_rect;
+            {
+                let buffer = result.buffer.lock();
                 render_info.queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &self.slots[0].texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d {
-                            x: tile.tex_rect.pos.x,
-                            y: tile.tex_rect.pos.y,
+                            x: tex_rect.pos.x,
+                            y: tex_rect.pos.y,
                             z: 0,
                         },
                         aspect: wgpu::TextureAspect::All,
                     },
-                    buffer,
+                    buffer.as_slice(),
                     wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(size_of::<Pixel>() as u32 * tile.tex_rect.size.x),
-                        rows_per_image: Some(tile.tex_rect.size.y),
+                        bytes_per_row: Some(size_of::<Pixel>() as u32 * tex_rect.size.x),
+                        rows_per_image: Some(tex_rect.size.y),
                     },
                     wgpu::Extent3d {
-                        width: tile.tex_rect.size.x,
-                        height: tile.tex_rect.size.y,
+                        width: tex_rect.size.x,
+                        height: tex_rect.size.y,
                         depth_or_array_layers: 1,
                     },
                 );
             }
-        });
+
+            self.tiles[result.index].state = TileState::Ready {
+                generation: result.generation,
+            };
+        }
     }
 
     fn surface_render(&self, render_info: &RenderContext) {
@@ -610,14 +651,10 @@ impl Tile {
 
 impl TileState {
     fn cancel(&mut self) {
-        if let TileState::Computing { cancel_token } = self {
+        if let TileState::Computing { cancel_token, .. } = self {
             cancel_token.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         *self = TileState::Idle;
-    }
-
-    fn is_computing(&self) -> bool {
-        matches!(self, TileState::Computing { .. })
     }
 }

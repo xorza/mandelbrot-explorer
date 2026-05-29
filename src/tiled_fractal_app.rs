@@ -8,17 +8,11 @@ use crate::math::DRect;
 use crate::{RenderContext, WindowContext};
 
 #[derive(Debug)]
-enum ManipulateState {
-    Idle,
-    Drag,
-}
-
-#[derive(Debug)]
 pub struct TiledFractalApp {
     window_size: UVec2,
     event_loop_proxy: EventLoopProxy<UserEvent>,
 
-    manipulate_state: ManipulateState,
+    dragging: bool,
 
     frame_rect: DRect,
 
@@ -54,7 +48,7 @@ impl TiledFractalApp {
             window_size,
             event_loop_proxy,
 
-            manipulate_state: ManipulateState::Idle,
+            dragging: false,
 
             frame_rect,
 
@@ -89,24 +83,18 @@ impl TiledFractalApp {
 
                 EventResult::Redraw
             }
-            Event::MouseMove { position, delta } => match self.manipulate_state {
-                ManipulateState::Idle => EventResult::Continue,
-                ManipulateState::Drag => {
+            Event::MouseMove { position, delta } => {
+                if self.dragging {
                     self.move_scale(position, delta, 0.0);
-
                     EventResult::Redraw
-                }
-            },
-            Event::MouseButton(btn, state, _position) => match (btn, state) {
-                (MouseButtons::Left, ElementState::Pressed) => {
-                    self.manipulate_state = ManipulateState::Drag;
+                } else {
                     EventResult::Continue
                 }
-                _ => {
-                    self.manipulate_state = ManipulateState::Idle;
-                    EventResult::Continue
-                }
-            },
+            }
+            Event::MouseButton(btn, state, _position) => {
+                self.dragging = matches!((btn, state), (MouseButtons::Left, ElementState::Pressed));
+                EventResult::Continue
+            }
             Event::KeyboardInput(key) => {
                 if !cfg!(debug_assertions) {
                     return EventResult::Continue;
