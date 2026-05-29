@@ -1,0 +1,8 @@
+# Build for the host CPU so the portable_simd kernel uses the widest available
+# vectors (AVX2/AVX-512 on x86, full NEON on aarch64) and hardware FMA. Without
+# this, x86 falls back to baseline SSE2 (no AVX, no FMA) and `Simd<f64, 8>`
+# lowers to 4x 128-bit ops. The resulting binary is tuned to the build host —
+# replace `native` with an explicit `target-feature=+avx2,+fma` baseline if you
+# distribute builds.
+[build]
+rustflags = ["-C", "target-cpu=native"]
