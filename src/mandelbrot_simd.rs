@@ -18,10 +18,17 @@ type f64simd = Simd<f64, SIMD_LANE_COUNT>;
 type i64simd = Simd<i64, SIMD_LANE_COUNT>;
 type CountSimd = [Pixel; SIMD_LANE_COUNT];
 
+/// Raw escape data for one pixel. Smooth (μ) coloring is finished on the GPU,
+/// which has hardware `log2` and only pays it for visible pixels: the screen
+/// shader computes μ = `count − log₂(½·ln mag)`. `count == 0.0` is the in-set
+/// sentinel (never escaped within the iteration cap).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable, Default)]
 pub struct Pixel {
-    r: u16,
+    /// Escape iteration + 1 (so escaped pixels are ≥ 1), or 0.0 for in-set.
+    pub(crate) count: f32,
+    /// |z|² captured on the escape iteration (undefined when `count == 0`).
+    pub(crate) mag: f32,
 }
 
 const LANE_RAMP: [f64; SIMD_LANE_COUNT] = {
@@ -58,9 +65,9 @@ pub fn mandelbrot_simd(
 ) -> bool {
     assert_eq!(buffer.len(), (tile_size.x * tile_size.y) as usize);
     assert_eq!(tile_size.x % SIMD_LANE_COUNT as u32, 0);
-    // Counts are stored in a u16 (and used un-offset below); the caller caps
-    // `max_iterations` at `MAX_ITER`, far under this bound.
-    debug_assert!(max_iterations < u16::MAX as u32);
+    // μ ≈ max_iterations is stored as f32; the cap must stay within f32's exact
+    // integer range. `MAX_ITER` (4500) is far under this.
+    debug_assert!(max_iterations < (1 << 24));
 
     for y in 0..tile_size.y {
         if cancel_token.load(Ordering::Relaxed) {
@@ -120,7 +127,10 @@ pub fn mandelbrot_tile(
 
     match scan_border(tile_rect, tile_size, max_iterations, &cancel_token) {
         BorderScan::AllInSet => {
-            buffer.fill(Pixel { r: 0 });
+            buffer.fill(Pixel {
+                count: 0.0,
+                mag: 0.0,
+            });
             true
         }
         BorderScan::HasExterior => {
@@ -147,7 +157,7 @@ fn scan_border(
         return BorderScan::Cancelled;
     }
 
-    let any_escaped = |values: &CountSimd| values.iter().any(|p| p.r != 0);
+    let any_escaped = |values: &CountSimd| values.iter().any(|p| p.count != 0.0);
 
     // Top and bottom rows: full SIMD rows, like the main render.
     for y in [0, tile_size.y - 1] {
@@ -209,7 +219,10 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let in_set = in_cardioid | in_bulb;
 
     if in_set.all() {
-        return [Pixel { r: 0 }; SIMD_LANE_COUNT];
+        return [Pixel {
+            count: 0.0,
+            mag: 0.0,
+        }; SIMD_LANE_COUNT];
     }
 
     let mut zx = f64simd::splat(0.0);
@@ -218,6 +231,9 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let mut zy2 = f64simd::splat(0.0);
     let mut cnt = i64simd::splat(0);
     let mut escaped = in_set;
+    // |z|² captured on the iteration each lane first escapes, for smooth (μ)
+    // coloring; lanes that never escape keep 0.0 and are handled as in-set.
+    let mut mag_escape = f64simd::splat(0.0);
 
     let f64_4_0 = f64simd::splat(4.0);
     let i64_0 = i64simd::splat(0);
@@ -231,7 +247,11 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
             zx = zx2 - zy2 + cx;
             zx2 = zx * zx;
             zy2 = zy * zy;
-            escaped |= (zx2 + zy2).simd_ge(f64_4_0);
+            let mag = zx2 + zy2;
+            // Capture |z|² on the escape step: keep the stored value once escaped,
+            // else overwrite with the current magnitude. One select, no extra mask.
+            mag_escape = escaped.select(mag_escape, mag);
+            escaped |= mag.simd_ge(f64_4_0);
             cnt += escaped.select(i64_0, i64_1);
         }};
     }
@@ -261,12 +281,22 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     let max_iter_simd = i64simd::splat(max_iterations as i64);
     cnt = in_set.select(max_iter_simd, cnt);
 
-    cnt.as_array().map(|iters| {
-        if iters as u32 == max_iterations {
-            Pixel { r: 0 }
-        } else {
+    let counts = cnt.to_array();
+    let mags = mag_escape.to_array();
+    std::array::from_fn(|lane| {
+        let n = counts[lane];
+        if n as u32 == max_iterations {
+            // In the set (or never escaped within the cap): sentinel.
             Pixel {
-                r: 1 + iters as u16,
+                count: 0.0,
+                mag: 0.0,
+            }
+        } else {
+            // Raw escape data; the GPU finishes the smooth μ. `n + 1` keeps
+            // escaped pixels ≥ 1, distinct from the 0.0 in-set sentinel.
+            Pixel {
+                count: (n + 1) as f32,
+                mag: mags[lane] as f32,
             }
         }
     })
@@ -307,22 +337,33 @@ mod test {
             &mut buffer
         ));
 
-        // Pixel (x, y) samples c = (-2 + x*0.5, -2 + y*0.5).
-        let at = |x: u32, y: u32| buffer[(y * 8 + x) as usize].r;
+        // Pixel (x, y) samples c = (-2 + x*0.5, -2 + y*0.5). The kernel stores
+        // raw escape data (count = n+1, mag = |z|² at escape); the GPU finishes
+        // μ = count − log₂(½·ln mag). We reproduce that formula here.
+        let at = |x: u32, y: u32| buffer[(y * 8 + x) as usize];
+        let mu = |p: Pixel| p.count - (0.5 * (p.mag as f64).ln()).log2() as f32;
 
-        // Origin c = (0, 0): inside the set => never escapes => stored as 0.
-        // x=4 -> -2+2=0, y=4 -> 0.
-        assert_eq!(at(4, 4), 0, "origin is in the set");
+        // Origin c = (0, 0): inside the set => never escapes => sentinel 0.
+        assert_eq!(at(4, 4).count, 0.0, "origin is in the set");
 
-        // c = (-2, -2) (corner): z1 = c, |z1|^2 = 8 >= 4 escapes on iter 1, which
-        // does not increment the counter (escape iteration counts 0) => cnt 0,
-        // stored as 0 + 1 offset => 1.
-        assert_eq!(at(0, 0), 1, "far corner escapes immediately");
+        // c = (-2, -2): z1 = c, |z1|² = 8 ≥ 4 escapes on iter 1 (n = 0).
+        let corner = at(0, 0);
+        assert_eq!(corner.count, 1.0, "escapes on iteration 1");
+        assert!((corner.mag - 8.0).abs() < 1e-9, "mag = {}", corner.mag);
+        // μ = 1 − log₂(½·ln 8) = 1 − log₂(1.03972) = 0.94379.
+        assert!(
+            (mu(corner) - 0.94379).abs() < 1e-4,
+            "corner μ = {}",
+            mu(corner)
+        );
 
-        // c = (0.5, 0): zx progresses 0.5, 0.75, 1.0625, 1.6289 (4 non-escaping
-        // iterations), then 3.1533 whose square 9.94 >= 4 escapes on the 5th
-        // (uncounted) => cnt 4, stored as 4 + 1 offset => 5.
-        assert_eq!(at(5, 4), 5, "c=0.5 escapes after 4 counted iterations");
+        // c = (0.5, 0): zx → 0.5, 0.75, 1.0625, 1.6289 (4 counted iters), then
+        // 3.15331 on the 5th, |z|² = 9.9434. n = 4.
+        let cusp = at(5, 4);
+        assert_eq!(cusp.count, 5.0, "escapes after 4 counted iterations");
+        assert!((cusp.mag - 9.9434).abs() < 1e-3, "mag = {}", cusp.mag);
+        // μ = 5 − log₂(½·ln 9.9434) = 5 − log₂(1.14845) = 4.80030.
+        assert!((mu(cusp) - 4.80030).abs() < 1e-4, "c=0.5 μ = {}", mu(cusp));
     }
 
     #[test]
@@ -378,8 +419,8 @@ mod test {
                 &mut tiled
             ));
 
-            let full: Vec<u16> = full.iter().map(|p| p.r).collect();
-            let tiled: Vec<u16> = tiled.iter().map(|p| p.r).collect();
+            let full: Vec<(f32, f32)> = full.iter().map(|p| (p.count, p.mag)).collect();
+            let tiled: Vec<(f32, f32)> = tiled.iter().map(|p| (p.count, p.mag)).collect();
             assert_eq!(tiled, full, "tile vs full render differ for {rect:?}");
         }
 
@@ -393,7 +434,7 @@ mod test {
             &mut tiled
         ));
         assert!(
-            tiled.iter().all(|p| p.r == 0),
+            tiled.iter().all(|p| p.count == 0.0),
             "interior tile should be filled in-set"
         );
     }
@@ -430,7 +471,7 @@ mod test {
         for y in 0..image_size {
             for x in 0..image_size {
                 let index = (y * image_size + x) as usize;
-                let pixel = (buffer[index].r % 256) as u8;
+                let pixel = (buffer[index].count as u32 % 256) as u8;
                 let color = image::Rgb([pixel, pixel, pixel]);
                 image.put_pixel(x, y, color);
             }

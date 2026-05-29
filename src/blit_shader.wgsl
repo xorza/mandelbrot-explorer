@@ -28,10 +28,9 @@ fn vs_main(@builtin(vertex_index) idx: u32) -> VertexOutput {
 
 @group(0)
 @binding(1)
-var color: texture_2d<u32>;
+var color: texture_2d<f32>;
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> @location(0) u32 {
-    let r = textureLoad(color, vec2<u32>(vertex.tex_coord), 0).r;
-    return r;
+fn fs_main(vertex: VertexOutput) -> @location(0) vec2<f32> {
+    return textureLoad(color, vec2<u32>(vertex.tex_coord), 0).rg;
 }

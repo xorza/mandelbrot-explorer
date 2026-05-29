@@ -28,12 +28,12 @@ Data flows in two coordinate systems, both `f64` (`DRect` in `math.rs`):
 - `event.rs` — translates winit events into an internal `Event<UserEvent>` enum, decoupling app logic from winit. Handlers return `EventResult` (`Continue` / `Redraw` / `Exit`) which the main loop acts on.
 - `tiled_fractal_app.rs` — application logic. Holds `frame_rect`, the pan/zoom `ManipulateState` (Idle/Drag), and the `MandelTexture`. Translates mouse input into new `frame_rect`s and calls `MandelTexture::update`. Defines `UserEvent::TileReady`.
 - `mandel_texture.rs` — **the core**. See below.
-- `mandelbrot_simd.rs` — the compute kernel. 8-lane `Simd<f64>` Mandelbrot iteration. `MAX_ITER = 4500`. Output `Pixel` is a single `u16` iteration count. Checks an `AtomicBool` cancel token periodically so abandoned tiles bail early.
+- `mandelbrot_simd.rs` — the compute kernel. 8-lane `Simd<f64>` Mandelbrot iteration. `MAX_ITER = 4500`. Output `Pixel` is two `f32`s: `count` (escape iteration + 1, or `0.0` for in-set) and `mag` (`|z|²` captured on the escape iteration). The smooth (μ) coloring is finished on the GPU; the kernel only stores raw escape data. Checks an `AtomicBool` cancel token periodically so abandoned tiles bail early.
 - `buffer_pool.rs` — recycling free-list for tile pixel buffers. `BufferHandle` returns its `Vec<u8>` to the pool on `Drop` (via a `Weak` back-ref), avoiding per-tile reallocation; the pool grows on demand and never shrinks.
 - `compute_pool.rs` — `ComputePool`, a fixed set of OS worker threads pulling FIFO jobs off an `mpsc` channel. CPU-bound tile renders run here; workers detach and exit when the pool drops. Cancellation is not the pool's concern — jobs poll the `AtomicBool` token themselves.
 - `math.rs` — `URect` (texel/integer rects) and `DRect` (fractal-space `f64` rects with intersect/contains/center).
 - `render_pods.rs` — `#[repr(C)]` GPU POD structs: `ScreenRect` (full-screen quad verts) and `DrawParams` (proj matrix + texture size), pushed as **immediates** (push constants), not bind-group uniforms.
-- `blit_shader.wgsl` / `screen_shader.wgsl` — see rendering below. Texture is `texture_2d<u32>` (raw iteration counts), sampled with `textureLoad`.
+- `blit_shader.wgsl` / `screen_shader.wgsl` — see rendering below. Texture is `Rg32Float` (`texture_2d<f32>`: `r` = count, `g` = escape magnitude), sampled with `textureLoad`.
 
 ### MandelTexture: tiling, async compute, double-buffer preview
 
@@ -45,7 +45,7 @@ The 4096² texture (`TEXTURE_SIZE`) is divided into 128² **tiles** (`TILE_SIZE`
 `render` = `blit_textures` → `upload_tiles` → `surface_render`:
 - **Two texture slots** (`slots: [_; 2]`) act as a double buffer. When the frame changes, `blit_textures` reprojects the *old* texture (`slots[0]`) into `slots[1]` with a scale+translate matrix derived from the ratio of the previous and new `fractal_rect`, giving an immediately-scaled (blurry) preview, then `slots.swap(0, 1)`. This is what makes zoom feel instant before any new tile finishes. `blit_shader.wgsl` does this pass.
 - `upload_tiles` writes any `WaitForUpload` tile buffers into `slots[0]` via `queue.write_texture`.
-- `surface_render` draws `slots[0]` to the surface, offset/scaled so `fractal_rect` maps onto the visible `frame_rect`, and `screen_shader.wgsl` maps the `u32` iteration count through the 1-D palette (with a smooth-ish `pow(norm, 0.4)` curve and an edge-darkening factor).
+- `surface_render` draws `slots[0]` to the surface, offset/scaled so `fractal_rect` maps onto the visible `frame_rect`, and `screen_shader.wgsl` computes the renormalized smooth count μ = `count − log₂(½·ln mag)` (hardware `log2`, only for visible pixels), then maps it through the 1-D palette (a `pow(norm, 0.4)` curve and an edge-darkening factor).
 
 `calc_max_iters` raises the iteration cap as you zoom in (`log2(1/size²)`-based, capped at `MAX_ITER`), so deep zooms get more detail.
 
@@ -53,5 +53,5 @@ The 4096² texture (`TEXTURE_SIZE`) is divided into 128² **tiles** (`TILE_SIZE`
 
 - GPU validation errors are treated as fatal (`panic!`) — don't add silent error handling around wgpu calls.
 - The `frame_rect` ⊇ recompute relationship is the key performance invariant: avoid changes that recompute tiles on every pan within the texture margin.
-- Pixel format is a single `u16` iteration count, not color; coloring is entirely shader-side. Keep it that way unless changing both the texture format and `screen_shader.wgsl`.
+- Pixel format is raw escape data (`count`, `mag`) as `Rg32Float`, not color; coloring (including the smooth-μ log) is entirely shader-side. Keep the kernel free of transcendentals — finishing μ on the CPU cost 2–4× (8 scalar `ln`s per pixel); the GPU does it nearly free. Keep it that way unless changing both the texture format and `screen_shader.wgsl`.
 - `fractal_rect_prev` is written **only** by `blit_textures` (it tracks the rect the current slot's pixels were rendered at). Do not assign it in `update` — several `update`s can coalesce before one render, and reassigning there misaligns the preview reprojection.

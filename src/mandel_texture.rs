@@ -107,7 +107,7 @@ impl MandelTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R16Uint,
+            format: wgpu::TextureFormat::Rg32Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_DST,
@@ -121,7 +121,7 @@ impl MandelTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R16Uint,
+            format: wgpu::TextureFormat::Rg32Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_DST,
@@ -210,7 +210,7 @@ impl MandelTexture {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
-                        sample_type: wgpu::TextureSampleType::Uint,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -274,7 +274,7 @@ impl MandelTexture {
                 module: &blit_shader,
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::TextureFormat::R16Uint.into())],
+                targets: &[Some(wgpu::TextureFormat::Rg32Float.into())],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: None,
