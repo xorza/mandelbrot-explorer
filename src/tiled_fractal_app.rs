@@ -5,7 +5,12 @@ use winit::event_loop::EventLoopProxy;
 use crate::event::{ElementState, Event, EventResult, MouseButtons};
 use crate::mandel_texture::MandelTexture;
 use crate::math::DRect;
+use crate::perturbation::HpCenter;
 use crate::{RenderContext, WindowContext};
+
+/// Decimal digits the high-precision view centre carries — supports zoom to
+/// ~1e-80, far past any `f64`-renderable depth.
+const CENTER_DIGITS: usize = 80;
 
 #[derive(Debug)]
 pub struct TiledFractalApp {
@@ -15,6 +20,9 @@ pub struct TiledFractalApp {
     dragging: bool,
 
     frame_rect: DRect,
+    // High-precision view centre, kept in sync with `frame_rect` but exact below
+    // f64 epsilon so deep-zoom pans aren't lost. Drives the perturbation path.
+    center: HpCenter,
 
     mandel_texture: MandelTexture,
 }
@@ -42,7 +50,8 @@ impl TiledFractalApp {
         );
 
         let aspect = DVec2::new(window_size.x as f64 / window_size.y as f64, 1.0);
-        let frame_rect = DRect::from_center_size(DVec2::new(-0.74, 0.0), aspect * 2.5);
+        let center_pos = DVec2::new(-0.74, 0.0);
+        let frame_rect = DRect::from_center_size(center_pos, aspect * 2.5);
 
         let mut result = Self {
             window_size,
@@ -51,6 +60,7 @@ impl TiledFractalApp {
             dragging: false,
 
             frame_rect,
+            center: HpCenter::new(center_pos, CENTER_DIGITS),
 
             mandel_texture,
         };
@@ -115,6 +125,9 @@ impl TiledFractalApp {
             scroll_delta,
         );
         self.frame_rect = result.frame_rect;
+        // Accumulate the same centre shift in high precision (the f64 `frame_rect`
+        // centre can't represent it once zoomed past ~1e-15).
+        self.center.translate(result.center_delta);
         self.update_fractal(result.focus);
     }
 
@@ -127,11 +140,12 @@ impl TiledFractalApp {
     fn update_fractal(&mut self, focus: DVec2) {
         let event_loop_proxy = self.event_loop_proxy.clone();
 
-        self.mandel_texture.update(self.frame_rect, focus, move || {
-            // A worker can finish after the event loop has closed (shutdown);
-            // the redraw it wants is moot then, so a closed loop is not an error.
-            let _ = event_loop_proxy.send_event(UserEvent::TileReady);
-        });
+        self.mandel_texture
+            .update(self.frame_rect, focus, &self.center, move || {
+                // A worker can finish after the event loop has closed (shutdown);
+                // the redraw it wants is moot then, so a closed loop is not an error.
+                let _ = event_loop_proxy.send_event(UserEvent::TileReady);
+            });
     }
 }
 
@@ -139,6 +153,10 @@ impl TiledFractalApp {
 struct ManipulateResult {
     frame_rect: DRect,
     focus: DVec2,
+    /// The centre shift this manipulation applied, computed from sizes/pointer
+    /// fractions (not by subtracting absolute centres) so it stays `f64`-exact
+    /// even when the absolute centre can no longer represent it.
+    center_delta: DVec2,
 }
 
 /// Pure pan/zoom math: maps the current viewport plus a pointer interaction to
@@ -167,13 +185,18 @@ fn frame_after_manipulation(
     let old_size = frame_rect.size;
     let new_size = old_size * zoom;
 
-    let old_center = frame_rect.center();
-    let new_center = old_center - mouse_delta * new_size - mouse_pos * (new_size - old_size);
+    // Centre shift in fractal units, from sizes and pointer fractions only.
+    let center_delta = -mouse_delta * new_size - mouse_pos * (new_size - old_size);
+    let new_center = frame_rect.center() + center_delta;
 
     let frame_rect = DRect::from_center_size(new_center, new_size);
     let focus = frame_rect.center() + frame_rect.size * mouse_pos;
 
-    ManipulateResult { frame_rect, focus }
+    ManipulateResult {
+        frame_rect,
+        focus,
+        center_delta,
+    }
 }
 
 #[cfg(test)]

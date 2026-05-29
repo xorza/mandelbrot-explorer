@@ -60,31 +60,103 @@ impl ReferenceOrbit {
     pub fn from_center_decimal(re: &str, im: &str, max_iterations: u32, digits: usize) -> Self {
         use dashu::float::DBig;
 
-        let round = |x: dashu::float::round::Rounded<DBig>| x.value();
-        let at_prec = |x: DBig| round(x.with_precision(digits));
-        let cr = at_prec(re.parse::<DBig>().expect("valid decimal"));
-        let ci = at_prec(im.parse::<DBig>().expect("valid decimal"));
-        let two = DBig::from(2u8);
-
-        let mut zr = DBig::ZERO;
-        let mut zi = DBig::ZERO;
-        let mut z = Vec::with_capacity(max_iterations as usize + 1);
-        for _ in 0..=max_iterations {
-            let fx = zr.to_f64().value();
-            let fy = zi.to_f64().value();
-            z.push(DVec2::new(fx, fy));
-            if fx * fx + fy * fy > ESCAPE_R2 {
-                break;
-            }
-            // Z' = (zr² − zi² + cr,  2·zr·zi + ci), each rounded back to `digits`.
-            let zr2 = at_prec(&zr * &zr);
-            let zi2 = at_prec(&zi * &zi);
-            let nzr = at_prec(&zr2 - &zi2 + &cr);
-            let nzi = at_prec(&two * &zr * &zi + &ci);
-            zr = nzr;
-            zi = nzi;
+        let cr = re.parse::<DBig>().expect("valid decimal");
+        let ci = im.parse::<DBig>().expect("valid decimal");
+        Self {
+            z: orbit_from_dbig(cr, ci, max_iterations, digits),
         }
-        Self { z }
+    }
+}
+
+/// Iterates `Z_{n+1} = Z_n² + C` in arbitrary precision (`digits` decimal
+/// digits), downcasting each `Z_n` to `f64`. Shared by the decimal constructor
+/// and `HpCenter`.
+fn orbit_from_dbig(
+    cr: dashu::float::DBig,
+    ci: dashu::float::DBig,
+    max_iterations: u32,
+    digits: usize,
+) -> Vec<DVec2> {
+    use dashu::float::DBig;
+
+    let at_prec = |x: DBig| x.with_precision(digits).value();
+    let cr = at_prec(cr);
+    let ci = at_prec(ci);
+    let two = DBig::from(2u8);
+
+    let mut zr = DBig::ZERO;
+    let mut zi = DBig::ZERO;
+    let mut z = Vec::with_capacity(max_iterations as usize + 1);
+    for _ in 0..=max_iterations {
+        let fx = zr.to_f64().value();
+        let fy = zi.to_f64().value();
+        z.push(DVec2::new(fx, fy));
+        if fx * fx + fy * fy > ESCAPE_R2 {
+            break;
+        }
+        // Z' = (zr² − zi² + cr,  2·zr·zi + ci), each rounded back to `digits`.
+        // `nzi` reads the old `zr`, so compute both before reassigning.
+        let zr2 = at_prec(&zr * &zr);
+        let zi2 = at_prec(&zi * &zi);
+        let nzr = at_prec(&zr2 - &zi2 + &cr);
+        let nzi = at_prec(&two * &zr * &zi + &ci);
+        zr = nzr;
+        zi = nzi;
+    }
+    z
+}
+
+/// `f64` → decimal `DBig` via its round-trip decimal string (Rust's `Display`
+/// never uses scientific notation, so this parses cleanly).
+fn dbig_from_f64(v: f64, digits: usize) -> dashu::float::DBig {
+    format!("{v}")
+        .parse::<dashu::float::DBig>()
+        .expect("finite f64 is valid decimal")
+        .with_precision(digits)
+        .value()
+}
+
+/// A view centre held in arbitrary precision so it stays exact far below `f64`
+/// epsilon. Pan/zoom accumulate small `f64` deltas into it (which would vanish
+/// if added to an `f64` centre at deep zoom), and it produces the reference
+/// orbit for the perturbation kernel.
+#[derive(Debug, Clone)]
+pub struct HpCenter {
+    re: dashu::float::DBig,
+    im: dashu::float::DBig,
+    digits: usize,
+}
+
+impl HpCenter {
+    pub fn new(center: DVec2, digits: usize) -> Self {
+        Self {
+            re: dbig_from_f64(center.x, digits),
+            im: dbig_from_f64(center.y, digits),
+            digits,
+        }
+    }
+
+    /// Shifts the centre by a small `f64` offset, preserving precision.
+    pub fn translate(&mut self, delta: DVec2) {
+        use dashu::float::DBig;
+        let at = |x: DBig| x.with_precision(self.digits).value();
+        self.re = at(&self.re + dbig_from_f64(delta.x, self.digits));
+        self.im = at(&self.im + dbig_from_f64(delta.y, self.digits));
+    }
+
+    pub fn to_dvec2(&self) -> DVec2 {
+        DVec2::new(self.re.to_f64().value(), self.im.to_f64().value())
+    }
+
+    pub fn reference_orbit(&self, max_iterations: u32) -> ReferenceOrbit {
+        ReferenceOrbit {
+            z: orbit_from_dbig(
+                self.re.clone(),
+                self.im.clone(),
+                max_iterations,
+                self.digits,
+            ),
+        }
     }
 }
 
@@ -198,6 +270,29 @@ mod test {
         }
         // Boundary rounding should affect only a sliver of the 4096 pixels.
         assert!(off_by_one < n / 50, "{off_by_one} pixels differ (of {n})");
+    }
+
+    /// `HpCenter` must accumulate pans far below `f64` epsilon — the whole point
+    /// of high-precision centre tracking for deep zoom.
+    #[test]
+    fn hp_center_keeps_sub_epsilon_pans() {
+        let mut hp = HpCenter::new(DVec2::new(-0.75, 0.0), 40);
+        for _ in 0..1000 {
+            hp.translate(DVec2::new(1e-18, 0.0)); // ULP(-0.75) ≈ 1.1e-16 ≫ 1e-18
+        }
+        // 1000 × 1e-18 = 1e-15 of accumulated motion, preserved here…
+        assert!(
+            (hp.to_dvec2().x + 0.75).abs() > 5e-16,
+            "pan was lost: {}",
+            hp.to_dvec2().x
+        );
+
+        // …while a plain f64 accumulator loses every step (stays exactly -0.75).
+        let mut f = -0.75f64;
+        for _ in 0..1000 {
+            f += 1e-18;
+        }
+        assert_eq!(f, -0.75, "f64 cannot represent the sub-epsilon pan");
     }
 
     /// The bignum reference orbit must agree with the f64 one for a centre that

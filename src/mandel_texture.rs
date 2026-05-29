@@ -12,10 +12,17 @@ use crate::buffer_pool::{BufferHandle, BufferPool};
 use crate::compute_pool::ComputePool;
 use crate::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_tile};
 use crate::math::{DRect, URect};
+use crate::perturbation::{HpCenter, ReferenceOrbit, mandelbrot_perturbation};
 use crate::render_pods::{DrawParams, FULLSCREEN_QUAD_VERTS};
 
 const TILE_SIZE: u32 = 128;
 const TEXTURE_SIZE: u32 = 4 * 1024;
+
+/// Below this view width (fractal units), `f64` can no longer resolve adjacent
+/// pixels, so tiles switch to the perturbation kernel against a high-precision
+/// reference. Set a couple orders of magnitude above the ~1e-15 `f64` wall so
+/// the handoff happens before any visible degradation.
+const DEEP_THRESHOLD: f64 = 1e-11;
 
 /// Per-tile state, owned entirely on the main thread. `generation` is the
 /// `fractal_rect` epoch the content was computed for; a tile is only valid when
@@ -79,6 +86,10 @@ pub struct MandelTexture {
     // Bumped whenever `fractal_rect` changes; stamps tile content so stale tiles
     // (and stale in-flight results) are recognised and recomputed.
     generation: u64,
+
+    // Some when the view is deep enough to need perturbation: the reference
+    // orbit (shared across this generation's tile jobs). None on the shallow path.
+    reference: Option<Arc<ReferenceOrbit>>,
 }
 
 fn calc_max_iters(fractal_rect: DRect) -> u32 {
@@ -352,6 +363,7 @@ impl MandelTexture {
             fractal_rect_prev: DRect::zeroed(),
             frame_changed: false,
             generation: 0,
+            reference: None,
 
             screen_pipeline,
 
@@ -359,8 +371,13 @@ impl MandelTexture {
         }
     }
 
-    pub fn update<F>(&mut self, frame_rect: DRect, focus: DVec2, tile_ready_callback: F)
-    where
+    pub fn update<F>(
+        &mut self,
+        frame_rect: DRect,
+        focus: DVec2,
+        center: &HpCenter,
+        tile_ready_callback: F,
+    ) where
         F: Fn() + Clone + Send + Sync + 'static,
     {
         self.frame_rect = frame_rect;
@@ -373,7 +390,12 @@ impl MandelTexture {
             ),
         );
 
-        let frame_changed = !self.fractal_rect.contains(&frame_rect)
+        // Past the f64 wall the frame centre can't track sub-epsilon pans, so the
+        // "left the margin" test never fires — recompute every update against the
+        // high-precision centre instead.
+        let deep = new_fractal_rect.size.x < DEEP_THRESHOLD;
+        let frame_changed = deep
+            || !self.fractal_rect.contains(&frame_rect)
             || self.fractal_rect.size != new_fractal_rect.size;
 
         if frame_changed {
@@ -388,6 +410,10 @@ impl MandelTexture {
 
         let max_iters = calc_max_iters(self.fractal_rect);
         let generation = self.generation;
+
+        // Deep: build the reference orbit once for this generation; tiles iterate
+        // as deltas off it. Shallow: the direct kernel on absolute coordinates.
+        self.reference = deep.then(|| Arc::new(center.reference_orbit(max_iters)));
 
         // One pass over the grid: cancel anything out of view, keep tiles whose
         // content is already valid for this generation (so a static view or a
@@ -422,6 +448,7 @@ impl MandelTexture {
             self.tiles[idx].state.cancel();
 
             let tile_rect = self.tiles[idx].fractal_rect(self.texture_size, self.fractal_rect);
+            let delta_rect = self.tiles[idx].delta_rect(self.texture_size, self.fractal_rect.size);
             let tile_px = self.tiles[idx].tex_rect.size;
 
             let cancel_token = Arc::new(AtomicBool::new(false));
@@ -429,13 +456,29 @@ impl MandelTexture {
             let result_tx = self.result_tx.clone();
             let callback = tile_ready_callback.clone();
             let buffer = self.buf_pool.take();
+            let reference = self.reference.clone();
 
             self.pool.spawn(move || {
                 let compute_ok = {
                     let buffer = &mut *buffer.lock();
                     let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
-                    mandelbrot_tile(tile_rect, tile_px, max_iters, cancel_token_clone, buffer)
+                    match &reference {
+                        // Deep: perturbation off the shared reference orbit. Not
+                        // cancellable (scalar, runs to completion); stale results
+                        // are dropped on arrival by the generation check.
+                        Some(orbit) => {
+                            mandelbrot_perturbation(orbit, delta_rect, tile_px, max_iters, buffer);
+                            true
+                        }
+                        None => mandelbrot_tile(
+                            tile_rect,
+                            tile_px,
+                            max_iters,
+                            cancel_token_clone,
+                            buffer,
+                        ),
+                    }
                 };
 
                 if compute_ok {
@@ -623,6 +666,17 @@ impl Tile {
 
         DRect::from_pos_size(tile_pos, tile_size)
     }
+
+    /// The tile's rect as offsets from the *centre* of `fractal_size`, computed
+    /// only from sizes — so it stays `f64`-exact at deep zoom (no subtraction of
+    /// near-equal absolute coordinates). Fed to the perturbation kernel as `dc`.
+    pub(crate) fn delta_rect(&self, tex_size: u32, fractal_size: DVec2) -> DRect {
+        let abs_frame_size = DVec2::splat(tex_size as f64);
+        let tile_size = fractal_size * DVec2::from(self.tex_rect.size) / abs_frame_size;
+        let tile_pos =
+            fractal_size * DVec2::from(self.tex_rect.pos) / abs_frame_size - fractal_size * 0.5;
+        DRect::from_pos_size(tile_pos, tile_size)
+    }
 }
 
 impl TileState {
@@ -679,5 +733,47 @@ mod tests {
         assert_eq!(by_size(1e-12), MAX_ITER);
         // Monotonic: zooming in never lowers the iteration budget.
         assert!(by_size(0.01) >= by_size(0.1));
+    }
+
+    /// The deep path splits a perturbation render into tiles via `Tile::delta_rect`.
+    /// That tiling must reconstruct exactly what a single full-image perturbation
+    /// render produces (which is itself validated against the direct kernel).
+    #[test]
+    fn deep_tiling_matches_single_perturbation_render() {
+        use crate::perturbation::{ReferenceOrbit, mandelbrot_perturbation};
+
+        let n = 2 * TILE_SIZE; // 256: a 2×2 tile grid
+        let max_iter = 500;
+        let center = DVec2::new(-0.745, 0.113);
+        let size = DVec2::splat(0.004);
+        let orbit = ReferenceOrbit::from_center_f64(center, max_iter);
+
+        // Single full-image render: delta offsets span [-size/2, +size/2].
+        let mut full = vec![Pixel::default(); (n * n) as usize];
+        let full_delta = DRect::from_pos_size(-size * 0.5, size);
+        mandelbrot_perturbation(&orbit, full_delta, UVec2::splat(n), max_iter, &mut full);
+
+        // Tiled render: each tile's `delta_rect`, placed back into the full image.
+        let mut tiled = vec![Pixel::default(); (n * n) as usize];
+        for ty in (0..n).step_by(TILE_SIZE as usize) {
+            for tx in (0..n).step_by(TILE_SIZE as usize) {
+                let dr = tile(tx, ty).delta_rect(n, size);
+                let mut buf = vec![Pixel::default(); (TILE_SIZE * TILE_SIZE) as usize];
+                mandelbrot_perturbation(&orbit, dr, UVec2::splat(TILE_SIZE), max_iter, &mut buf);
+                for ly in 0..TILE_SIZE {
+                    for lx in 0..TILE_SIZE {
+                        tiled[((ty + ly) * n + (tx + lx)) as usize] =
+                            buf[(ly * TILE_SIZE + lx) as usize];
+                    }
+                }
+            }
+        }
+
+        assert!(
+            full.iter()
+                .zip(&tiled)
+                .all(|(a, b)| a.count == b.count && a.mag == b.mag),
+            "tiled deep render must equal the single-call render"
+        );
     }
 }
