@@ -1,75 +1,111 @@
 //! Offscreen render of the Mandelbrot view to a PNG — no window or display.
 //!
-//! Drives the real CPU kernel (`mandelbrot_simd`), uploads its `(count, mag)`
-//! output to the `Rg32Float` texture, and runs the real `screen_shader.wgsl`
-//! (smooth μ coloring + embedded palette) into an offscreen sRGB target, then
-//! reads it back and writes a PNG. Useful for eyeballing coloring changes in
-//! headless environments where the winit app can't open a window.
+//! Drives the real CPU kernel, uploads its output to a float texture, and runs
+//! the real screen shader (smooth μ coloring + embedded palette, or `--de`
+//! distance-estimation shading) into an offscreen sRGB target, then reads it
+//! back and writes a PNG. Useful for eyeballing coloring changes in headless
+//! environments where the winit app can't open a window.
 //!
 //! Usage:
-//!   cargo run --release --example render_png -- [out.png] [size] [cx cy half] [max_iter]
+//!   cargo run --release --example render_png -- [out.png] [size] [cx cy half] [max_iter] [--de]
 //! Defaults: mandelbrot.png 1024  (full set: -0.5 0 1.5)  auto max_iter.
 
 use std::sync::mpsc;
 
 use bytemuck::{Pod, Zeroable};
-use fractal::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_simd};
+use fractal::mandelbrot_simd::{DePixel, MAX_ITER, Pixel, mandelbrot_simd, mandelbrot_simd_de};
 use fractal::math::DRect;
 use glam::{DVec2, Mat4, UVec2, Vec2};
 
-/// Mirrors the `DrawParams` immediate block `screen_shader.wgsl` expects.
+/// Mirrors the `DrawParams` immediate block the shaders expect. `extra.x` is the
+/// pixel spacing the DE shader reads; the smooth shader ignores it.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct DrawParams {
     proj_mat: Mat4,
     texture_size: Vec2,
-    _padding: Vec2,
+    extra: Vec2,
 }
 
 fn main() {
-    let mut args = std::env::args().skip(1);
-    let out_path = args.next().unwrap_or_else(|| "mandelbrot.png".to_string());
-    let size = args
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let de_mode = raw.iter().any(|a| a == "--de");
+    let mut pos = raw.into_iter().filter(|a| a != "--de");
+
+    let out_path = pos.next().unwrap_or_else(|| "mandelbrot.png".to_string());
+    let size = pos
         .next()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(1024)
         .next_multiple_of(8);
 
-    // Optional view: center (cx, cy) and half-extent. Default = the whole set.
     let parse = |a: &mut dyn Iterator<Item = String>| a.next().and_then(|s| s.parse::<f64>().ok());
-    let cx = parse(&mut args).unwrap_or(-0.5);
-    let cy = parse(&mut args).unwrap_or(0.0);
-    let half = parse(&mut args).unwrap_or(1.5);
+    let cx = parse(&mut pos).unwrap_or(-0.5);
+    let cy = parse(&mut pos).unwrap_or(0.0);
+    let half = parse(&mut pos).unwrap_or(1.5);
     let rect = DRect::from_pos_size(DVec2::new(cx - half, cy - half), DVec2::splat(2.0 * half));
 
-    let max_iter = args
+    let max_iter = pos
         .next()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or_else(|| {
-            // Same spirit as MandelTexture::calc_max_iters: more detail when zoomed.
             (1000.0 + (1.0 / rect.size.length_squared()).log2().max(0.0) * 50.0) as u32
         })
         .min(MAX_ITER);
 
-    eprintln!("rendering {size}×{size} @ center ({cx}, {cy}) half {half}, max_iter {max_iter}");
-
-    // 1. CPU render into the (count, mag) buffer.
     let tile_size = UVec2::splat(size);
-    let mut buffer = vec![Pixel::default(); (size * size) as usize];
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    assert!(mandelbrot_simd(
-        rect,
-        tile_size,
-        max_iter,
-        cancel,
-        &mut buffer
-    ));
+    let pixel_spacing = (rect.size.x / size as f64) as f32;
+    eprintln!(
+        "rendering {size}×{size} @ ({cx}, {cy}) half {half}, max_iter {max_iter}{}",
+        if de_mode { ", distance estimation" } else { "" }
+    );
 
-    pollster::block_on(color_to_png(&buffer, size, &out_path));
+    // CPU render, then GPU color + readback. Both paths share one render helper;
+    // only the texel format and shader differ.
+    let params = DrawParams {
+        proj_mat: Mat4::IDENTITY,
+        texture_size: Vec2::splat(size as f32),
+        extra: Vec2::new(pixel_spacing, 0.0),
+    };
+    if de_mode {
+        let mut buf = vec![DePixel::default(); (size * size) as usize];
+        assert!(mandelbrot_simd_de(
+            rect, tile_size, max_iter, cancel, &mut buf
+        ));
+        pollster::block_on(render(
+            bytemuck::cast_slice(&buf),
+            wgpu::TextureFormat::Rgba32Float,
+            include_str!("../src/de_shader.wgsl"),
+            params,
+            size,
+            &out_path,
+        ));
+    } else {
+        let mut buf = vec![Pixel::default(); (size * size) as usize];
+        assert!(mandelbrot_simd(rect, tile_size, max_iter, cancel, &mut buf));
+        pollster::block_on(render(
+            bytemuck::cast_slice(&buf),
+            wgpu::TextureFormat::Rg32Float,
+            include_str!("../src/screen_shader.wgsl"),
+            params,
+            size,
+            &out_path,
+        ));
+    }
     eprintln!("wrote {out_path}");
 }
 
-async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
+/// Uploads `data_bytes` (a `size×size` texture in `data_format`), runs `shader`
+/// into an offscreen sRGB target with the embedded palette, and writes a PNG.
+async fn render(
+    data_bytes: &[u8],
+    data_format: wgpu::TextureFormat,
+    shader_src: &str,
+    params: DrawParams,
+    size: u32,
+    out_path: &str,
+) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         flags: Default::default(),
@@ -108,14 +144,14 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
         height: size,
         depth_or_array_layers: 1,
     };
+    let texel_size = data_format.target_pixel_byte_cost().unwrap();
 
-    // Iteration-data texture, matching MandelTexture's slot format.
     let data_texture = device.create_texture(&wgpu::TextureDescriptor {
         size: extent,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rg32Float,
+        format: data_format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
         label: None,
@@ -127,17 +163,16 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        bytemuck::cast_slice(buffer),
+        data_bytes,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(size * size_of::<Pixel>() as u32),
+            bytes_per_row: Some(size * texel_size),
             rows_per_image: Some(size),
         },
         extent,
     );
     let data_view = data_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // Palette (same embedded RGBA as the app).
     let palette_texture = device.create_texture(&wgpu::TextureDescriptor {
         size: wgpu::Extent3d {
             width: 256,
@@ -152,7 +187,6 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
         view_formats: &[],
         label: None,
     });
-    let palette_rgba = include_bytes!("../palette.rgba");
     queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &palette_texture,
@@ -160,7 +194,7 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        palette_rgba,
+        include_bytes!("../palette.rgba"),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(256 * 4),
@@ -239,7 +273,7 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
     let target_format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(include_str!("../src/screen_shader.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(shader_src.into()),
     });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
@@ -280,14 +314,6 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
     });
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // Identity projection renders the whole data texture 1:1 onto the target.
-    let params = DrawParams {
-        proj_mat: Mat4::IDENTITY,
-        texture_size: Vec2::splat(size as f32),
-        _padding: Vec2::ZERO,
-    };
-
-    // Read-back buffer; rows padded to the copy alignment.
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
     let unpadded_bpr = size * 4;
     let padded_bpr = unpadded_bpr.next_multiple_of(align);
@@ -341,7 +367,6 @@ async fn color_to_png(buffer: &[Pixel], size: u32, out_path: &str) {
     );
     queue.submit(Some(encoder.finish()));
 
-    // Map and read back, stripping any per-row padding.
     let slice = readback.slice(..);
     let (tx, rx) = mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());

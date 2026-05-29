@@ -31,6 +31,22 @@ pub struct Pixel {
     pub(crate) mag: f32,
 }
 
+/// `Pixel` plus the derivative magnitude for exterior **distance estimation**:
+/// the GPU computes `d ≈ √mag · ½·ln mag / √dmag` (≈ |z|·ln|z|/|z'|), the
+/// distance to the set in fractal units. Produced only by `mandelbrot_simd_de`
+/// (a quality pass) — the derivative iteration is too heavy for the interactive
+/// kernel, so the fast path stays on `Pixel`. `count == 0.0` is the in-set
+/// sentinel; the 4th field pads to a GPU `Rgba32Float` texel.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable, Default)]
+pub struct DePixel {
+    pub(crate) count: f32,
+    pub(crate) mag: f32,
+    /// |z'|² captured on the escape iteration (undefined when `count == 0`).
+    pub(crate) dmag: f32,
+    pub(crate) _pad: f32,
+}
+
 const LANE_RAMP: [f64; SIMD_LANE_COUNT] = {
     let mut r = [0.0; SIMD_LANE_COUNT];
     let mut i = 0;
@@ -90,6 +106,48 @@ pub fn mandelbrot_simd(
             let values_simd = pixel(max_iterations, cx, cy);
             let idx = (y * tile_size.x + x * SIMD_LANE_COUNT as u32) as usize;
             buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(values_simd.as_slice());
+        }
+    }
+
+    true
+}
+
+/// Distance-estimation render of `tile_rect`: like `mandelbrot_simd`, but also
+/// iterates the derivative `z'` and emits `dmag` (|z'|² at escape) per pixel for
+/// crisp boundary/filament shading. Heavier than the plain kernel (a complex
+/// multiply-add per iteration), so it's a quality pass, not the interactive one.
+/// Returns `false` if `cancel_token` was raised before completion.
+pub fn mandelbrot_simd_de(
+    tile_rect: DRect,
+    tile_size: UVec2,
+    max_iterations: u32,
+    cancel_token: Arc<AtomicBool>,
+    buffer: &mut [DePixel],
+) -> bool {
+    assert_eq!(buffer.len(), (tile_size.x * tile_size.y) as usize);
+    assert_eq!(tile_size.x % SIMD_LANE_COUNT as u32, 0);
+    debug_assert!(max_iterations < (1 << 24));
+
+    for y in 0..tile_size.y {
+        if cancel_token.load(Ordering::Relaxed) {
+            return false;
+        }
+        let cy = f64simd::splat(axis_scalar(
+            tile_rect.pos.y,
+            tile_rect.size.y,
+            tile_size.y,
+            y,
+        ));
+        for x in 0..tile_size.x / SIMD_LANE_COUNT as u32 {
+            let cx = axis_lanes(
+                tile_rect.pos.x,
+                tile_rect.size.x,
+                tile_size.x,
+                x * SIMD_LANE_COUNT as u32,
+            );
+            let values = pixel_de(max_iterations, cx, cy);
+            let idx = (y * tile_size.x + x * SIMD_LANE_COUNT as u32) as usize;
+            buffer[idx..idx + SIMD_LANE_COUNT].copy_from_slice(&values);
         }
     }
 
@@ -302,6 +360,99 @@ fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
     })
 }
 
+/// As `pixel`, but also carries the derivative `z'` (`dz`) for distance
+/// estimation. `dz_{n+1} = 2·z_n·dz_n + 1` is evaluated with the pre-update
+/// `z_n`, so `dz` and `z` stay in step; `|z'|²` at escape goes into `dmag`.
+fn pixel_de(max_iterations: u32, cx: f64simd, cy: f64simd) -> [DePixel; SIMD_LANE_COUNT] {
+    let cy2 = cy * cy;
+    let xm = cx - f64simd::splat(0.25);
+    let q = xm * xm + cy2;
+    let in_cardioid = (q * (q + xm)).simd_le(f64simd::splat(0.25) * cy2);
+    let xp1 = cx + f64simd::splat(1.0);
+    let in_bulb = (xp1 * xp1 + cy2).simd_le(f64simd::splat(0.0625));
+    let in_set = in_cardioid | in_bulb;
+
+    if in_set.all() {
+        return [DePixel::default(); SIMD_LANE_COUNT];
+    }
+
+    let mut zx = f64simd::splat(0.0);
+    let mut zy = f64simd::splat(0.0);
+    let mut zx2 = f64simd::splat(0.0);
+    let mut zy2 = f64simd::splat(0.0);
+    let mut dzx = f64simd::splat(0.0);
+    let mut dzy = f64simd::splat(0.0);
+    let mut cnt = i64simd::splat(0);
+    let mut escaped = in_set;
+    let mut mag_escape = f64simd::splat(0.0);
+    let mut dmag_escape = f64simd::splat(0.0);
+
+    let f64_4_0 = f64simd::splat(4.0);
+    let two = f64simd::splat(2.0);
+    let one = f64simd::splat(1.0);
+    let i64_0 = i64simd::splat(0);
+    let i64_1 = i64simd::splat(1);
+
+    macro_rules! step {
+        () => {{
+            // dz_{n+1} = 2·z_n·dz_n + 1, using z_n (the pre-update z).
+            let ndzx = two * (zx * dzx - zy * dzy) + one;
+            let ndzy = two * (zx * dzy + zy * dzx);
+            dzx = ndzx;
+            dzy = ndzy;
+
+            zy = (zx + zx).mul_add(zy, cy);
+            zx = zx2 - zy2 + cx;
+            zx2 = zx * zx;
+            zy2 = zy * zy;
+            let mag = zx2 + zy2;
+            mag_escape = escaped.select(mag_escape, mag);
+            dmag_escape = escaped.select(dmag_escape, dzx * dzx + dzy * dzy);
+            escaped |= mag.simd_ge(f64_4_0);
+            cnt += escaped.select(i64_0, i64_1);
+        }};
+    }
+
+    let mut i = 0u32;
+    let mut all_escaped = false;
+    while i + SIMD_LANE_COUNT as u32 <= max_iterations {
+        for _ in 0..SIMD_LANE_COUNT {
+            step!();
+        }
+        i += SIMD_LANE_COUNT as u32;
+        if escaped.all() {
+            all_escaped = true;
+            break;
+        }
+    }
+    if !all_escaped {
+        while i < max_iterations {
+            step!();
+            i += 1;
+        }
+    }
+
+    let max_iter_simd = i64simd::splat(max_iterations as i64);
+    cnt = in_set.select(max_iter_simd, cnt);
+
+    let counts = cnt.to_array();
+    let mags = mag_escape.to_array();
+    let dmags = dmag_escape.to_array();
+    std::array::from_fn(|lane| {
+        let n = counts[lane];
+        if n as u32 == max_iterations {
+            DePixel::default()
+        } else {
+            DePixel {
+                count: (n + 1) as f32,
+                mag: mags[lane] as f32,
+                dmag: dmags[lane] as f32,
+                _pad: 0.0,
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
@@ -364,6 +515,50 @@ mod test {
         assert!((cusp.mag - 9.9434).abs() < 1e-3, "mag = {}", cusp.mag);
         // μ = 5 − log₂(½·ln 9.9434) = 5 − log₂(1.14845) = 4.80030.
         assert!((mu(cusp) - 4.80030).abs() < 1e-4, "c=0.5 μ = {}", mu(cusp));
+    }
+
+    #[test]
+    fn de_derivative_matches_hand_computed() {
+        // Same 8×8 tile, distance-estimation kernel: it must reproduce count/mag
+        // and additionally the derivative magnitude dmag = |z'|² at escape.
+        let tile_size = UVec2::splat(8);
+        let tile_rect = DRect::from_pos_size(DVec2::splat(-2.0), DVec2::splat(4.0));
+        let max_iterations = 50;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut buffer = vec![DePixel::default(); 64];
+
+        assert!(mandelbrot_simd_de(
+            tile_rect,
+            tile_size,
+            max_iterations,
+            cancel,
+            &mut buffer
+        ));
+        let at = |x: u32, y: u32| buffer[(y * 8 + x) as usize];
+
+        // Origin is in the set: sentinel, no derivative.
+        assert_eq!(at(4, 4).count, 0.0);
+
+        // c = (-2, -2): escapes on iter 1, z'_1 = 2·z_0·z'_0 + 1 = 1 ⇒ dmag = 1.
+        let corner = at(0, 0);
+        assert_eq!(corner.count, 1.0);
+        assert!(
+            (corner.dmag - 1.0).abs() < 1e-9,
+            "corner dmag = {}",
+            corner.dmag
+        );
+
+        // c = (0.5, 0): z' → 1, 2, 4, 9.5, then 2·1.62890625·9.5 + 1 = 31.94922
+        // on the escape (5th) step ⇒ dmag = 31.94922² = 1020.75.
+        let cusp = at(5, 4);
+        assert_eq!(cusp.count, 5.0);
+        assert!(
+            (cusp.dmag - 1020.75).abs() < 1e-1,
+            "c=0.5 dmag = {}",
+            cusp.dmag
+        );
+        // count/mag must still match the plain kernel.
+        assert!((cusp.mag - 9.9434).abs() < 1e-3, "c=0.5 mag = {}", cusp.mag);
     }
 
     #[test]
