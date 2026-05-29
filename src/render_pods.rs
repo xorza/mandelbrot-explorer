@@ -1,33 +1,37 @@
-use std::mem::size_of;
-
-use bytemuck::{Pod, Zeroable};
+use encase::{ShaderSize, ShaderType, UniformBuffer};
 use glam::{Mat4, Vec2};
 
 /// The full-screen quad is generated vertex-buffer-free in the shaders from
 /// `@builtin(vertex_index)` (a 4-vertex triangle strip), so there is no vertex
-/// POD here — only the push-constant block.
+/// POD here — only the immediate (push-constant) block.
 pub const FULLSCREEN_QUAD_VERTS: u32 = 4;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+/// Immediate block for the blit/screen shaders. `encase` derives the GPU layout
+/// (matching the WGSL `var<immediate>` rules) so it can't silently drift from
+/// the shader struct. glam values convert to `mint` at the boundary — encase has
+/// no glam-0.33 impls yet, but `mint` is version-stable interop both share.
+#[derive(Debug, Clone, Copy, ShaderType)]
 pub struct DrawParams {
-    pub proj_mat: Mat4,
-    pub texture_size: Vec2,
-    _padding: Vec2,
+    proj_mat: mint::ColumnMatrix4<f32>,
+    texture_size: mint::Vector2<f32>,
 }
 
 impl DrawParams {
-    pub fn new() -> Self {
+    pub fn new(proj_mat: Mat4, texture_size: Vec2) -> Self {
         Self {
-            proj_mat: Mat4::IDENTITY,
-            texture_size: Vec2::default(),
-            _padding: Vec2::default(),
+            proj_mat: proj_mat.into(),
+            texture_size: texture_size.into(),
         }
     }
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(self)
+
+    /// Bytes in GPU immediate layout, ready for `set_immediates`.
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut buffer = UniformBuffer::new(Vec::new());
+        buffer.write(self).unwrap();
+        buffer.into_inner()
     }
+
     pub fn size_in_bytes() -> u32 {
-        size_of::<DrawParams>() as u32
+        Self::SHADER_SIZE.get() as u32
     }
 }

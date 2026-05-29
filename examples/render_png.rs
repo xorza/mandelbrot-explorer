@@ -12,19 +12,26 @@
 
 use std::sync::mpsc;
 
-use bytemuck::{Pod, Zeroable};
+use encase::{ShaderType, UniformBuffer};
 use fractal::mandelbrot_simd::{DePixel, MAX_ITER, Pixel, mandelbrot_simd, mandelbrot_simd_de};
 use fractal::math::DRect;
 use glam::{DVec2, Mat4, UVec2, Vec2};
 
-/// Mirrors the `DrawParams` immediate block the shaders expect. `extra.x` is the
-/// pixel spacing the DE shader reads; the smooth shader ignores it.
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+/// Immediate block for both shaders (layout via `encase`). `pixel_spacing` is
+/// read by the DE shader; the smooth shader treats it as trailing padding.
+#[derive(ShaderType)]
 struct DrawParams {
-    proj_mat: Mat4,
-    texture_size: Vec2,
-    extra: Vec2,
+    proj_mat: mint::ColumnMatrix4<f32>,
+    texture_size: mint::Vector2<f32>,
+    pixel_spacing: f32,
+}
+
+impl DrawParams {
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut buffer = UniformBuffer::new(Vec::new());
+        buffer.write(self).unwrap();
+        buffer.into_inner()
+    }
 }
 
 fn main() {
@@ -64,9 +71,9 @@ fn main() {
     // CPU render, then GPU color + readback. Both paths share one render helper;
     // only the texel format and shader differ.
     let params = DrawParams {
-        proj_mat: Mat4::IDENTITY,
-        texture_size: Vec2::splat(size as f32),
-        extra: Vec2::new(pixel_spacing, 0.0),
+        proj_mat: Mat4::IDENTITY.into(),
+        texture_size: Vec2::splat(size as f32).into(),
+        pixel_spacing,
     };
     if de_mode {
         let mut buf = vec![DePixel::default(); (size * size) as usize];
@@ -266,7 +273,7 @@ async fn render(
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         bind_group_layouts: &[Some(&bind_group_layout)],
-        immediate_size: size_of::<DrawParams>() as u32,
+        immediate_size: <DrawParams as encase::ShaderSize>::SHADER_SIZE.get() as u32,
         label: None,
     });
 
@@ -344,7 +351,7 @@ async fn render(
             multiview_mask: None,
         });
         pass.set_pipeline(&pipeline);
-        pass.set_immediates(0, bytemuck::bytes_of(&params));
+        pass.set_immediates(0, &params.as_bytes());
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..4, 0..1);
     }

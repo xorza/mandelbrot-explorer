@@ -8,7 +8,9 @@ edition = "2024"
 [dependencies]
 winit = "0.30"
 bytemuck = { version = "1.25", features = ["derive"] }
-glam = { version = "0.33", features = ["bytemuck"] }
+glam = { version = "0.33", features = ["bytemuck", "mint"] }
+encase = { version = "*", features = ["mint"] }
+mint = "*"
 wgpu = "29"
 pollster = "0.4"
 num_cpus = "1.17"
@@ -24,7 +26,7 @@ bench = false
 
 [dev-dependencies]
 image = "0.25"
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "mandelbrot_simd"

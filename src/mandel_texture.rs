@@ -497,12 +497,13 @@ impl MandelTexture {
             let offset = 2.0 * DVec2::new(offset.x, -offset.y);
             let scale = self.fractal_rect_prev.size / self.fractal_rect.size;
 
-            let mut pc = DrawParams::new();
-            pc.proj_mat = Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0))
-                * Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0));
-            pc.texture_size = Vec2::splat(self.texture_size as f32);
+            let pc = DrawParams::new(
+                Mat4::from_scale(Vec3::new(scale.x as f32, scale.y as f32, 1.0))
+                    * Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0)),
+                Vec2::splat(self.texture_size as f32),
+            );
 
-            render_pass.set_immediates(0, pc.as_bytes());
+            render_pass.set_immediates(0, &pc.as_bytes());
 
             render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
             render_pass.draw(0..FULLSCREEN_QUAD_VERTS, 0..1);
@@ -574,11 +575,12 @@ impl MandelTexture {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut pc = DrawParams::new();
-            pc.proj_mat = Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
-                * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0));
-            // The vertex-less screen shader derives texel UVs from this.
-            pc.texture_size = tex_size;
+            // The vertex-less screen shader derives texel UVs from `texture_size`.
+            let pc = DrawParams::new(
+                Mat4::from_translation(Vec3::new(offset.x as f32, offset.y as f32, 0.0))
+                    * Mat4::from_scale(Vec3::new(scale.x, scale.y, 1.0)),
+                tex_size,
+            );
 
             let mut render_pass = command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -597,7 +599,7 @@ impl MandelTexture {
                 multiview_mask: None,
             });
             render_pass.set_pipeline(&self.screen_pipeline);
-            render_pass.set_immediates(0, pc.as_bytes());
+            render_pass.set_immediates(0, &pc.as_bytes());
             render_pass.set_bind_group(0, &self.slots[0].bind_group, &[]);
             render_pass.draw(0..FULLSCREEN_QUAD_VERTS, 0..1);
         }
