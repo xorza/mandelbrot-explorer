@@ -10,7 +10,7 @@ use glam::{DVec2, Mat4, UVec2, Vec2, Vec3};
 use crate::RenderContext;
 use crate::buffer_pool::{BufferHandle, BufferPool};
 use crate::compute_pool::ComputePool;
-use crate::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_simd};
+use crate::mandelbrot_simd::{MAX_ITER, Pixel, mandelbrot_tile};
 use crate::math::{DRect, URect};
 use crate::render_pods::{DrawParams, FULLSCREEN_QUAD_VERTS};
 
@@ -435,7 +435,7 @@ impl MandelTexture {
                     let buffer = &mut *buffer.lock();
                     let buffer: &mut [Pixel] = bytemuck::cast_slice_mut(buffer);
 
-                    mandelbrot_simd(tile_rect, tile_px, max_iters, cancel_token_clone, buffer)
+                    mandelbrot_tile(tile_rect, tile_px, max_iters, cancel_token_clone, buffer)
                 };
 
                 if compute_ok {

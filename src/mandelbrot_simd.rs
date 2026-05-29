@@ -24,7 +24,7 @@ pub struct Pixel {
     r: u16,
 }
 
-const CX_INIT: [f64; SIMD_LANE_COUNT] = {
+const LANE_RAMP: [f64; SIMD_LANE_COUNT] = {
     let mut r = [0.0; SIMD_LANE_COUNT];
     let mut i = 0;
     while i < SIMD_LANE_COUNT {
@@ -33,6 +33,18 @@ const CX_INIT: [f64; SIMD_LANE_COUNT] = {
     }
     r
 };
+
+/// Fractal-space coordinate of `SIMD_LANE_COUNT` consecutive pixels starting at
+/// pixel `base` along an axis spanning `span` over `n` pixels from `pos`.
+fn axis_lanes(pos: f64, span: f64, n: u32, base: u32) -> f64simd {
+    (f64simd::from_array(LANE_RAMP) + f64simd::splat(base as f64)) * f64simd::splat(span / n as f64)
+        + f64simd::splat(pos)
+}
+
+/// Fractal-space coordinate of a single pixel `i` along the same axis.
+fn axis_scalar(pos: f64, span: f64, n: u32, i: u32) -> f64 {
+    pos + span * (i as f64 / n as f64)
+}
 
 //noinspection RsConstantConditionIf
 /// Renders `tile_rect` (in fractal space) into `buffer` at `tile_size` pixels.
@@ -54,14 +66,18 @@ pub fn mandelbrot_simd(
         if cancel_token.load(Ordering::Relaxed) {
             return false;
         }
+        let cy = f64simd::splat(axis_scalar(
+            tile_rect.pos.y,
+            tile_rect.size.y,
+            tile_size.y,
+            y,
+        ));
         for x in 0..tile_size.x / SIMD_LANE_COUNT as u32 {
-            let cx =
-                f64simd::from_array(CX_INIT) + f64simd::splat((x * SIMD_LANE_COUNT as u32) as f64);
-            let cx = cx * f64simd::splat(tile_rect.size.x / tile_size.x as f64);
-            let cx = cx + f64simd::splat(tile_rect.pos.x);
-
-            let cy = f64simd::splat(
-                tile_rect.pos.y + tile_rect.size.y * (y as f64 / tile_size.y as f64),
+            let cx = axis_lanes(
+                tile_rect.pos.x,
+                tile_rect.size.x,
+                tile_size.x,
+                x * SIMD_LANE_COUNT as u32,
             );
 
             let values_simd = pixel(max_iterations, cx, cy);
@@ -71,6 +87,112 @@ pub fn mandelbrot_simd(
     }
 
     true
+}
+
+/// Outcome of scanning a tile's one-pixel border.
+#[derive(Debug, PartialEq, Eq)]
+enum BorderScan {
+    /// Every border pixel stayed in the set (never escaped).
+    AllInSet,
+    /// At least one border pixel escaped.
+    HasExterior,
+    /// `cancel_token` was raised mid-scan.
+    Cancelled,
+}
+
+/// Renders `tile_rect` into `buffer`, with a Mariani–Silver shortcut: if the
+/// tile's one-pixel border is entirely in the set, the Mandelbrot set's simple
+/// connectedness means the interior is too, so the tile is filled with 0 without
+/// iterating the ~97% of pixels inside the border. Otherwise it falls back to a
+/// full render. Returns `false` if cancelled (matching `mandelbrot_simd`).
+///
+/// The border is sampled at pixel centres, so a sub-pixel exterior filament that
+/// slips between two border samples can be missed — the standard Mariani–Silver
+/// discretization error, rare and visually tiny at the interior fill level.
+pub fn mandelbrot_tile(
+    tile_rect: DRect,
+    tile_size: UVec2,
+    max_iterations: u32,
+    cancel_token: Arc<AtomicBool>,
+    buffer: &mut [Pixel],
+) -> bool {
+    assert_eq!(buffer.len(), (tile_size.x * tile_size.y) as usize);
+
+    match scan_border(tile_rect, tile_size, max_iterations, &cancel_token) {
+        BorderScan::AllInSet => {
+            buffer.fill(Pixel { r: 0 });
+            true
+        }
+        BorderScan::HasExterior => {
+            mandelbrot_simd(tile_rect, tile_size, max_iterations, cancel_token, buffer)
+        }
+        BorderScan::Cancelled => false,
+    }
+}
+
+/// Classifies the tile's one-pixel border. A pixel is "in set" iff `pixel`
+/// stores 0 (never escaped within `max_iterations`) — the same classification
+/// the full render uses, so the fill is byte-identical to brute force whenever
+/// the connectedness argument holds.
+fn scan_border(
+    tile_rect: DRect,
+    tile_size: UVec2,
+    max_iterations: u32,
+    cancel_token: &AtomicBool,
+) -> BorderScan {
+    assert_eq!(tile_size.x % SIMD_LANE_COUNT as u32, 0);
+    assert_eq!(tile_size.y % SIMD_LANE_COUNT as u32, 0);
+
+    if cancel_token.load(Ordering::Relaxed) {
+        return BorderScan::Cancelled;
+    }
+
+    let any_escaped = |values: &CountSimd| values.iter().any(|p| p.r != 0);
+
+    // Top and bottom rows: full SIMD rows, like the main render.
+    for y in [0, tile_size.y - 1] {
+        let cy = f64simd::splat(axis_scalar(
+            tile_rect.pos.y,
+            tile_rect.size.y,
+            tile_size.y,
+            y,
+        ));
+        for x in 0..tile_size.x / SIMD_LANE_COUNT as u32 {
+            let cx = axis_lanes(
+                tile_rect.pos.x,
+                tile_rect.size.x,
+                tile_size.x,
+                x * SIMD_LANE_COUNT as u32,
+            );
+            if any_escaped(&pixel(max_iterations, cx, cy)) {
+                return BorderScan::HasExterior;
+            }
+        }
+    }
+
+    // Left and right columns: walk down each edge eight rows at a time, holding
+    // the column's `cx` constant across the lanes.
+    for x in [0, tile_size.x - 1] {
+        let cx = f64simd::splat(axis_scalar(
+            tile_rect.pos.x,
+            tile_rect.size.x,
+            tile_size.x,
+            x,
+        ));
+        for y in 0..tile_size.y / SIMD_LANE_COUNT as u32 {
+            let cy = axis_lanes(
+                tile_rect.pos.y,
+                tile_rect.size.y,
+                tile_size.y,
+                y * SIMD_LANE_COUNT as u32,
+            );
+            if any_escaped(&pixel(max_iterations, cx, cy)) {
+                return BorderScan::HasExterior;
+            }
+        }
+    }
+
+    BorderScan::AllInSet
 }
 
 fn pixel(max_iterations: u32, cx: f64simd, cy: f64simd) -> CountSimd {
@@ -201,6 +323,79 @@ mod test {
         // iterations), then 3.1533 whose square 9.94 >= 4 escapes on the 5th
         // (uncounted) => cnt 4, stored as 4 + 1 offset => 5.
         assert_eq!(at(5, 4), 5, "c=0.5 escapes after 4 counted iterations");
+    }
+
+    #[test]
+    fn border_scan_classifies_tiles() {
+        let tile_size = UVec2::splat(64);
+        let max_iterations = 200;
+        let cancel = AtomicBool::new(false);
+        let scan = |rect| scan_border(rect, tile_size, max_iterations, &cancel);
+
+        // Deep inside the main cardioid: every border pixel stays in the set.
+        let interior = DRect::from_pos_size(DVec2::splat(-0.1), DVec2::splat(0.2));
+        assert_eq!(scan(interior), BorderScan::AllInSet);
+
+        // Straddling the western boundary of the set: border crosses into the
+        // exterior.
+        let boundary = DRect::from_pos_size(DVec2::new(-2.0, -1.0), DVec2::splat(2.0));
+        assert_eq!(scan(boundary), BorderScan::HasExterior);
+
+        // Far exterior: everything escapes immediately.
+        let exterior = DRect::from_pos_size(DVec2::splat(2.0), DVec2::splat(0.5));
+        assert_eq!(scan(exterior), BorderScan::HasExterior);
+    }
+
+    #[test]
+    fn tile_fill_is_byte_identical_to_full_render() {
+        let tile_size = UVec2::splat(64);
+        let max_iterations = 200;
+        let n = (tile_size.x * tile_size.y) as usize;
+
+        // The fast-path (interior) tile plus two fall-back tiles. For all three,
+        // `mandelbrot_tile` must reproduce `mandelbrot_simd` exactly.
+        let interior = DRect::from_pos_size(DVec2::splat(-0.1), DVec2::splat(0.2));
+        let boundary = DRect::from_pos_size(DVec2::new(-2.0, -1.0), DVec2::splat(2.0));
+        let exterior = DRect::from_pos_size(DVec2::splat(2.0), DVec2::splat(0.5));
+
+        for rect in [interior, boundary, exterior] {
+            let mut full = vec![Pixel::default(); n];
+            let mut tiled = vec![Pixel::default(); n];
+            let cancel = Arc::new(AtomicBool::new(false));
+
+            assert!(mandelbrot_simd(
+                rect,
+                tile_size,
+                max_iterations,
+                cancel.clone(),
+                &mut full
+            ));
+            assert!(mandelbrot_tile(
+                rect,
+                tile_size,
+                max_iterations,
+                cancel,
+                &mut tiled
+            ));
+
+            let full: Vec<u16> = full.iter().map(|p| p.r).collect();
+            let tiled: Vec<u16> = tiled.iter().map(|p| p.r).collect();
+            assert_eq!(tiled, full, "tile vs full render differ for {rect:?}");
+        }
+
+        // The interior tile must actually take the fill shortcut: all zeros.
+        let mut tiled = vec![Pixel::default(); n];
+        assert!(mandelbrot_tile(
+            interior,
+            tile_size,
+            max_iterations,
+            Arc::new(AtomicBool::new(false)),
+            &mut tiled
+        ));
+        assert!(
+            tiled.iter().all(|p| p.r == 0),
+            "interior tile should be filled in-set"
+        );
     }
 
     #[test]

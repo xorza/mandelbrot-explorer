@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use fractal::mandelbrot_simd::{Pixel, mandelbrot_simd};
+use fractal::mandelbrot_simd::{Pixel, mandelbrot_simd, mandelbrot_tile};
 use fractal::math::DRect;
 use glam::{DVec2, UVec2};
 
@@ -81,5 +81,58 @@ fn bench_kernel(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_kernel);
+/// Compares the full render against the Mariani–Silver `mandelbrot_tile` on an
+/// interior-heavy tile (where the fill path triggers) and a boundary tile (where
+/// it falls back and the border scan is pure overhead).
+fn bench_tile_fill(c: &mut Criterion) {
+    let mut group = c.benchmark_group("tile_fill");
+    let tile = 128u32;
+    let tile_size = UVec2::splat(tile);
+    let pixels = (tile * tile) as u64;
+    let max_iterations = 1024;
+    group.throughput(Throughput::Elements(pixels));
+
+    // Deep inside the main cardioid: every pixel is in-set, so the full render
+    // burns `max_iterations` on all of them while `mandelbrot_tile` fills.
+    let interior = DRect::from_pos_size(DVec2::splat(-0.1), DVec2::splat(0.2));
+    // Straddles the boundary: `mandelbrot_tile` pays the border scan, then the
+    // full render anyway.
+    let boundary = DRect::from_pos_size(DVec2::new(-1.0, -0.5), DVec2::splat(1.0));
+
+    for (name, rect) in [("interior", interior), ("boundary", boundary)] {
+        let mut buffer = vec![Pixel::default(); pixels as usize];
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        group.bench_with_input(BenchmarkId::new("full", name), &rect, |b, rect| {
+            b.iter(|| {
+                assert!(mandelbrot_simd(
+                    *rect,
+                    tile_size,
+                    max_iterations,
+                    cancel.clone(),
+                    &mut buffer
+                ));
+            });
+        });
+        group.bench_with_input(
+            BenchmarkId::new("mariani_silver", name),
+            &rect,
+            |b, rect| {
+                b.iter(|| {
+                    assert!(mandelbrot_tile(
+                        *rect,
+                        tile_size,
+                        max_iterations,
+                        cancel.clone(),
+                        &mut buffer
+                    ));
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_kernel, bench_tile_fill);
 criterion_main!(benches);
