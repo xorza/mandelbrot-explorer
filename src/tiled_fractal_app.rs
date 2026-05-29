@@ -25,7 +25,7 @@ pub enum UserEvent {
 }
 
 impl TiledFractalApp {
-    pub fn new(
+    pub(crate) fn new(
         window_state: &WindowContext,
         event_loop_proxy: EventLoopProxy<UserEvent>,
     ) -> TiledFractalApp {

@@ -20,7 +20,7 @@ type CountSimd = [Pixel; SIMD_LANE_COUNT];
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable, Default)]
-pub(crate) struct Pixel {
+pub struct Pixel {
     r: u16,
 }
 
